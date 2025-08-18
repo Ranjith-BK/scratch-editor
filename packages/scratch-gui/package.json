@@ -140,7 +140,7 @@
     "@typescript-eslint/parser": "8.7.0",
     "babel-core": "7.0.0-bridge.0",
     "babel-loader": "9.2.1",
-    "cheerio": "1.0.0-rc.3",
+    "cheerio": "1.1.2",
     "cross-env": "7.0.3",
     "enzyme": "3.11.0",
     "enzyme-adapter-react-16": "1.15.8",
