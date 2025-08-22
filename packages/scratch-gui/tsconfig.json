@@ -1,5 +1,5 @@
 {
-  "include": ["src"],
+  "include": ["src", "../scratch-vm/src"],
   "compilerOptions": {
     /* Visit https://aka.ms/tsconfig to read more about this file */
 
@@ -9,6 +9,13 @@
 
     /* Modules */
     "module": "commonjs",
+    "moduleResolution": "node",
+    "allowJs": true,
+    "checkJs": false,
+    "baseUrl": ".",
+    "paths": {
+      "@scratch/scratch-vm": ["../scratch-vm/src/index.js"]
+    },
     "types": ["./src/types.d.ts"],
 
     /* Emit */
@@ -18,6 +25,7 @@
 
     /* Interop Constraints */
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
 
     /* Type Checking */

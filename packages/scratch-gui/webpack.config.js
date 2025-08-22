@@ -44,6 +44,9 @@ const baseConfig = new ScratchWebpackConfigBuilder(
             fallback: {
                 Buffer: require.resolve('buffer/'),
                 stream: require.resolve('stream-browserify')
+            },
+            alias: {
+                '@scratch/scratch-vm': path.resolve(__dirname, '../scratch-vm/src/index.js')
             }
         }
     })
