@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Extension Test - Dynamic Project Names</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:hover {
+            background: #0056b3;
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .code {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            border: 1px solid #e9ecef;
+        }
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            width: 200px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ML Extension Test - Dynamic Project Names</h1>
+        <p>This page demonstrates how to use the updated ML extension that automatically fetches project names from your API.</p>
+        
+        <div class="section">
+            <h2>Current Status</h2>
+            <div id="currentStatus" class="status info">Loading...</div>
+            <button class="button" onclick="checkStatus()">Refresh Status</button>
+        </div>
+        
+        <div class="section">
+            <h2>Set Session and Project IDs</h2>
+            <p>Enter your session and project IDs to test the extension:</p>
+            <input type="text" id="sessionId" placeholder="Session ID (e.g., session_aa3bffbf72c444c5)" />
+            <input type="text" id="projectId" placeholder="Project ID (e.g., eff8a1b8-4998-442a-a3a2-2e386ddbc9b8)" />
+            <button class="button" onclick="setIds()">Set IDs</button>
+            <button class="button" onclick="setIdsFromUrl()">Extract from URL</button>
+        </div>
+        
+        <div class="section">
+            <h2>Project Name Management</h2>
+            <button class="button" onclick="refreshProjectName()">Fetch Project Name from API</button>
+            <button class="button" onclick="checkProjectNameStatus()">Check Project Name Status</button>
+            <button class="button" onclick="forceUIRefresh()">Force UI Refresh</button>
+        </div>
+        
+        <div class="section">
+            <h2>Manual Project Name</h2>
+            <input type="text" id="manualProjectName" placeholder="Enter project name manually" />
+            <button class="button" onclick="setProjectName()">Set Project Name</button>
+        </div>
+        
+        <div class="section">
+            <h2>Testing</h2>
+            <button class="button" onclick="testConnection()">Test API Connection</button>
+            <button class="button" onclick="testCORS()">Test CORS Configuration</button>
+            <button class="button" onclick="clearStorage()">Clear All Data</button>
+        </div>
+        
+        <div class="section">
+            <h2>Console Functions</h2>
+            <p>You can also use these functions directly in the browser console:</p>
+            <div class="code">
+                // Check current status
+                MLExtension.getIds()
+                
+                // Set session and project IDs
+                MLExtension.setIds('session_aa3bffbf72c444c5', 'eff8a1b8-4998-442a-a3a2-2e386ddbc9b8')
+                
+                // Fetch project name from API
+                MLExtension.refreshProjectName()
+                
+                // Check if project name needs updating
+                MLExtension.checkProjectNameStatus()
+                
+                // Force UI refresh
+                MLExtension.forceUIRefresh()
+                
+                // Set project name manually
+                MLExtension.setProjectName('My Project')
+                
+                // Test API connection
+                MLExtension.testConnection()
+                
+                // Test CORS configuration
+                MLExtension.testCORS()
+                
+                // Clear all data
+                MLExtension.clearStorage()
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>How It Works</h2>
+            <p>The extension now automatically:</p>
+            <ul>
+                <li>Fetches the project name from <code>/api/guests/session/{session_id}/projects/{project_id}</code></li>
+                <li>Updates the category name from "sample" to the actual project name</li>
+                <li>Stores the project name in localStorage for persistence</li>
+                <li>Provides functions to manually refresh and manage the project name</li>
+            </ul>
+            <p><strong>Note:</strong> The extension name change may require a page refresh or workspace refresh to be visible in the Scratch interface.</p>
+        </div>
+    </div>
+
+    <script>
+        // Wait for page to load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if MLExtension is available
+            setTimeout(checkExtensionAvailable, 1000);
+        });
+
+        function checkExtensionAvailable() {
+            if (typeof window.MLExtension !== 'undefined') {
+                updateStatus('Extension loaded successfully!', 'success');
+                checkStatus();
+            } else {
+                updateStatus('Extension not loaded. Make sure to load the ML extension in Scratch first.', 'error');
+            }
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('currentStatus');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        async function checkStatus() {
+            if (typeof window.MLExtension === 'undefined') {
+                updateStatus('Extension not available', 'error');
+                return;
+            }
+
+            try {
+                const ids = window.MLExtension.getIds();
+                let status = `Session ID: ${ids.sessionId || 'Not set'}<br>`;
+                status += `Project ID: ${ids.projectId || 'Not set'}<br>`;
+                status += `Project Name: ${ids.projectName || 'Not set'}`;
+                
+                if (ids.sessionId && ids.projectId) {
+                    updateStatus(status, 'success');
+                } else {
+                    updateStatus(status, 'info');
+                }
+            } catch (error) {
+                updateStatus(`Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        async function setIds() {
+            const sessionId = document.getElementById('sessionId').value.trim();
+            const projectId = document.getElementById('projectId').value.trim();
+            
+            if (!sessionId || !projectId) {
+                updateStatus('Please enter both session ID and project ID', 'error');
+                return;
+            }
+
+            try {
+                await window.MLExtension.setIds(sessionId, projectId);
+                updateStatus(`IDs set successfully! Fetching project name...`, 'success');
+                
+                // Wait a bit then check status
+                setTimeout(checkStatus, 2000);
+            } catch (error) {
+                updateStatus(`Error setting IDs: ${error.message}`, 'error');
+            }
+        }
+
+        function setIdsFromUrl() {
+            try {
+                window.MLExtension.initFromUrl();
+                updateStatus('Attempting to extract IDs from URL...', 'info');
+                setTimeout(checkStatus, 1000);
+            } catch (error) {
+                updateStatus(`Error extracting from URL: ${error.message}`, 'error');
+            }
+        }
+
+        async function refreshProjectName() {
+            try {
+                const result = await window.MLExtension.refreshProjectName();
+                if (result.success) {
+                    updateStatus(`Project name refreshed: ${result.projectName}`, 'success');
+                    setTimeout(checkStatus, 1000);
+                } else {
+                    updateStatus(`Failed to refresh: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error refreshing project name: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkProjectNameStatus() {
+            try {
+                const result = await window.MLExtension.checkProjectNameStatus();
+                if (result.success) {
+                    let status = `Current: ${result.currentName}<br>`;
+                    status += `API: ${result.apiName}<br>`;
+                    status += `Status: ${result.isCurrent ? 'Up to date' : 'Needs update'}`;
+                    
+                    updateStatus(status, result.isCurrent ? 'success' : 'info');
+                } else {
+                    updateStatus(`Check failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        function forceUIRefresh() {
+            try {
+                const result = window.MLExtension.forceUIRefresh();
+                if (result.success) {
+                    updateStatus(result.message, 'success');
+                } else {
+                    updateStatus(`UI refresh failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error refreshing UI: ${error.message}`, 'error');
+            }
+        }
+
+        function setProjectName() {
+            const name = document.getElementById('manualProjectName').value.trim();
+            if (!name) {
+                updateStatus('Please enter a project name', 'error');
+                return;
+            }
+
+            try {
+                const result = window.MLExtension.setProjectName(name);
+                if (result.success) {
+                    updateStatus(`Project name set to: ${result.projectName}`, 'success');
+                    setTimeout(checkStatus, 1000);
+                } else {
+                    updateStatus(`Failed to set name: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error setting name: ${error.message}`, 'error');
+            }
+        }
+
+        async function testConnection() {
+            try {
+                const result = await window.MLExtension.testConnection();
+                if (result.error) {
+                    updateStatus(`Connection test failed: ${result.error}`, 'error');
+                } else {
+                    updateStatus('Connection test successful!', 'success');
+                }
+            } catch (error) {
+                updateStatus(`Error testing connection: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCORS() {
+            try {
+                const result = await window.MLExtension.testCORS();
+                if (result.success) {
+                    let status = `CORS Test Results:<br>`;
+                    status += `Current Config: ${result.currentConfig}<br><br>`;
+                    
+                    result.results.forEach(r => {
+                        status += `${r.url}<br>`;
+                        status += `  Status: ${r.status}, CORS: ${r.cors}<br>`;
+                        if (!r.success) {
+                            status += `  Error: ${r.error}<br>`;
+                        }
+                        status += `<br>`;
+                    });
+                    
+                    status += `Recommendation: ${result.recommendation}`;
+                    updateStatus(status, 'info');
+                } else {
+                    updateStatus(`CORS test failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error testing CORS: ${error.message}`, 'error');
+            }
+        }
+
+        function clearStorage() {
+            try {
+                window.MLExtension.clearStorage();
+                updateStatus('All data cleared successfully!', 'success');
+                setTimeout(checkStatus, 1000);
+            } catch (error) {
+                updateStatus(`Error clearing data: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+

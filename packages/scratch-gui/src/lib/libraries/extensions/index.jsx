@@ -46,6 +46,9 @@ import gdxforInsetIconURL from './gdxfor/gdxfor-small.svg';
 import gdxforConnectionIconURL from './gdxfor/gdxfor-illustration.svg';
 import gdxforConnectionSmallIconURL from './gdxfor/gdxfor-small.svg';
 
+import mlIconURL from './ml/ml.png';
+import mlInsetIconURL from './ml/ml-small.svg';
+
 export default [
     {
         name: (
@@ -389,5 +392,21 @@ export default [
             />
         ),
         helpLink: 'https://scratch.mit.edu/wedo'
+    },
+    {
+        name: 'Machine Learning',
+        extensionId: 'ml',
+        iconURL: mlIconURL,
+        insetIconURL: mlInsetIconURL,
+        description: (
+            <FormattedMessage
+                defaultMessage="Train and use machine learning models for text classification."
+                description="Description for the 'Machine Learning' extension"
+                id="gui.extension.ml.description"
+            />
+        ),
+        featured: true,
+        disabled: false,
+        internetConnectionRequired: true
     }
 ];

@@ -77,7 +77,8 @@ class Blocks extends React.Component {
             'onWorkspaceUpdate',
             'onWorkspaceMetricsChange',
             'setBlocks',
-            'setLocale'
+            'setLocale',
+            'ensureMLExtensionLoaded'
         ]);
         this.ScratchBlocks.prompt = this.handlePromptStart;
         this.ScratchBlocks.statusButtonCallback = this.handleConnectionModalStart;
@@ -143,6 +144,25 @@ class Blocks extends React.Component {
         // If locale changes while not visible it will get handled in didUpdate
         if (this.props.isVisible) {
             this.setLocale();
+        }
+        
+        // Add global function to manually load ML extension if needed
+        if (typeof window !== 'undefined') {
+            window.loadMLExtension = () => {
+                if (this.props.vm && this.props.vm.extensionManager) {
+                    try {
+                        this.props.vm.extensionManager.loadExtensionIdSync('ml');
+                        console.log('ML Extension: Manually loaded via global function');
+                        return { success: true, message: 'ML Extension loaded' };
+                    } catch (error) {
+                        console.error('ML Extension: Failed to load via global function:', error);
+                        return { success: false, error: error.message };
+                    }
+                } else {
+                    return { success: false, error: 'VM not available' };
+                }
+            };
+            console.log('ML Extension: Global function window.loadMLExtension() available');
         }
     }
     shouldComponentUpdate (nextProps, nextState) {
@@ -276,7 +296,28 @@ class Blocks extends React.Component {
         this.props.vm.addListener('BLOCKSINFO_UPDATE', this.handleBlocksInfoUpdate);
         this.props.vm.addListener('PERIPHERAL_CONNECTED', this.handleStatusButtonUpdate);
         this.props.vm.addListener('PERIPHERAL_DISCONNECTED', this.handleStatusButtonUpdate);
+        
+        // Ensure ML extension is loaded when VM is attached
+        this.ensureMLExtensionLoaded();
     }
+    
+    ensureMLExtensionLoaded () {
+        // Ensure ML extension is loaded when VM is attached
+        if (this.props.vm && this.props.vm.extensionManager) {
+            try {
+                // Check if ML extension is already loaded
+                if (!this.props.vm.extensionManager._loadedExtensions.has('ml')) {
+                    this.props.vm.extensionManager.loadExtensionIdSync('ml');
+                    console.log('ML Extension: Automatically loaded when VM attached to blocks');
+                } else {
+                    console.log('ML Extension: Already loaded when VM attached to blocks');
+                }
+            } catch (error) {
+                console.warn('ML Extension: Failed to auto-load when VM attached:', error);
+            }
+        }
+    }
+    
     detachVM () {
         this.props.vm.removeListener('SCRIPT_GLOW_ON', this.onScriptGlowOn);
         this.props.vm.removeListener('SCRIPT_GLOW_OFF', this.onScriptGlowOff);
