@@ -11,16 +11,22 @@ export class LegacyStorage implements GUIStorage {
     private assetHost?: string;
     private backpackHost?: string;
     private translator?: TranslatorFunction;
+    private webStoresAdded = false;
 
     readonly scratchStorage = new ScratchStorage();
 
     constructor () {
         this.cacheDefaultProject(this.scratchStorage);
-        this.addOfficialScratchWebStores(this.scratchStorage);
+        // Don't add web stores in constructor - they need hosts to be set first
     }
 
     setProjectHost (host: string): void {
         this.projectHost = host;
+        // Add web stores if both project and asset hosts are set
+        if (this.projectHost && this.assetHost && !this.webStoresAdded) {
+            this.addOfficialScratchWebStores(this.scratchStorage);
+            this.webStoresAdded = true;
+        }
     }
 
     setProjectToken (token: string): void {
@@ -41,6 +47,11 @@ export class LegacyStorage implements GUIStorage {
 
     setAssetHost (host: string): void {
         this.assetHost = host;
+        // Add web stores if both project and asset hosts are set
+        if (this.projectHost && this.assetHost && !this.webStoresAdded) {
+            this.addOfficialScratchWebStores(this.scratchStorage);
+            this.webStoresAdded = true;
+        }
     }
 
     setTranslatorFunction (translator: TranslatorFunction): void {
@@ -51,7 +62,8 @@ export class LegacyStorage implements GUIStorage {
     }
 
     setBackpackHost (host: string): void {
-        const shouldAddSource = !this.backpackHost;
+        this.backpackHost = host;
+        const shouldAddSource = !this.webStoresAdded;
         if (shouldAddSource) {
             const AssetType = this.scratchStorage.AssetType;
 
@@ -60,8 +72,6 @@ export class LegacyStorage implements GUIStorage {
                 this.getBackpackAssetURL.bind(this)
             );
         }
-
-        this.backpackHost = host;
     }
 
     saveProject (
@@ -70,11 +80,11 @@ export class LegacyStorage implements GUIStorage {
         params: { originalId: string; isCopy: boolean; isRemix: boolean; title: string; }
     ): Promise<{ id: string | number; }> {
         // Haven't inlined the code here so that we can keep Git history on the implementation, just in case
-        return saveProjectToServer(this.projectHost, projectId, vmState, params);
+        return saveProjectToServer(this.projectHost!, projectId, vmState, params);
     }
 
     private cacheDefaultProject (storage: ScratchStorage) {
-        const defaultProjectAssets = defaultProject(this.translator);
+        const defaultProjectAssets = defaultProject(this.translator || (() => ''));
         defaultProjectAssets.forEach(asset => storage.builtinHelper._store(
             storage.AssetType[asset.assetType],
             storage.DataFormat[asset.dataFormat],
@@ -108,27 +118,27 @@ export class LegacyStorage implements GUIStorage {
     }
 
     private getProjectGetConfig (projectAsset) {
-        const path = `${this.projectHost}/${projectAsset.assetId}`;
+        const path = `${this.projectHost!}/${projectAsset.assetId}`;
         const qs = this.projectToken ? `?token=${this.projectToken}` : '';
         return path + qs;
     }
 
     private getProjectCreateConfig () {
         return {
-            url: `${this.projectHost}/`,
+            url: `${this.projectHost!}/`,
             withCredentials: true
         };
     }
 
     private getProjectUpdateConfig (projectAsset: Asset) {
         return {
-            url: `${this.projectHost}/${projectAsset.assetId}`,
+            url: `${this.projectHost!}/${projectAsset.assetId}`,
             withCredentials: true
         };
     }
 
     private getAssetGetConfig (asset: Asset) {
-        return `${this.assetHost}/internalapi/asset/${asset.assetId}.${asset.dataFormat}/get/`;
+        return `${this.assetHost!}/internalapi/asset/${asset.assetId}.${asset.dataFormat}/get/`;
     }
 
     private getAssetCreateConfig (asset: Asset) {
@@ -138,12 +148,12 @@ export class LegacyStorage implements GUIStorage {
             // assetId as part of the create URI. So, force the method to POST.
             // Then when storage finds this config to use for the "update", still POSTs
             method: 'post',
-            url: `${this.assetHost}/${asset.assetId}.${asset.dataFormat}`,
+            url: `${this.assetHost!}/${asset.assetId}.${asset.dataFormat}`,
             withCredentials: true
         };
     }
 
     private getBackpackAssetURL (asset) {
-        return `${this.backpackHost}/${asset.assetId}.${asset.dataFormat}`;
+        return `${this.backpackHost!}/${asset.assetId}.${asset.dataFormat}`;
     }
 }
