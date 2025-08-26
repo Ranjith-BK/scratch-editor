@@ -204,7 +204,7 @@ const NeuralApiExtension = {
 
 // API configuration
 const API_CONFIG = {
-    baseUrl: 'http://localhost:8000', // Change this to your backend URL
+    baseUrl: 'https://theneural-backend-ed2fe2fxhq-uc.a.run.app', // Production backend URL
     endpoints: {
         // Regular projects (for authenticated users)
         projects: '/projects',

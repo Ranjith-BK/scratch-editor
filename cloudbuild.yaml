@@ -1,0 +1,48 @@
+steps:
+  # Build the container image using Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/scratch-editor:$COMMIT_SHA'
+      - '.'
+    dir: 'scratch-editor'
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/scratch-editor:$COMMIT_SHA']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'scratch-editor'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/scratch-editor:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8601'
+      - '--memory'
+      - '4Gi'
+      - '--cpu'
+      - '4'
+      - '--max-instances'
+      - '10'
+      - '--min-instances'
+      - '1'
+
+# Store images in Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/scratch-editor:$COMMIT_SHA'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'  # Use high-CPU machine for faster builds
+  diskSizeGb: '50'  # Increase disk size for large builds
+  timeout: '1800s'  # 30 minutes timeout
