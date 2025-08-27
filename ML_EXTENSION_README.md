@@ -1,186 +1,203 @@
-# ML Extension - Dynamic Project Names
+# ML Extension for Scratch Editor
 
-This extension automatically fetches project names from your API instead of showing "sample" as the category name.
+This document explains how the ML extension works and how to test it.
 
-## What Changed
+## Overview
 
-The extension now:
-1. **Automatically fetches project names** from `/api/guests/session/{session_id}/projects/{project_id}`
-2. **Updates the category name** from "sample" to the actual project name
-3. **Stores project names** in localStorage for persistence
-4. **Provides manual refresh functions** for testing and debugging
+The ML extension automatically loads when the Scratch editor starts and provides ML prediction blocks based on your project data. It reads session ID and project ID from URL parameters and stores them in localStorage for persistence.
 
 ## How It Works
 
-### 1. Automatic Project Name Fetching
-When the extension loads or when session/project IDs are set, it automatically calls your API to get the project name:
+### 1. URL Parameter Parsing
+- The extension reads `sessionId` and `projectId` from the URL query string
+- Example: `https://scratch-editor-url/?sessionId=session_123&projectId=project_456`
+
+### 2. localStorage Storage
+- Session ID and project ID are saved to localStorage with keys:
+  - `ml_extension_session_id`
+  - `ml_extension_project_id`
+  - `ml_extension_url_timestamp`
+
+### 3. Project Data Fetching
+- The extension fetches project data from the API endpoint:
+  - `GET /api/guests/session/{sessionId}/projects/{projectId}`
+- This provides project name and labels for dynamic block generation
+
+### 4. Dynamic Block Creation
+- Creates prediction blocks based on the project's labels
+- Provides standard blocks for text recognition and confidence scoring
+
+## Available Blocks
+
+### Standard Blocks
+- **recognise text [TEXT] (label)** - Returns the predicted label for given text
+- **recognise text [TEXT] (confidence)** - Returns the confidence score for prediction
+
+### Dynamic Label Blocks
+- Automatically generated based on your project's labels
+- Each label gets its own reporter block
+
+## Testing the Extension
+
+### 1. Test HTML Page
+Use the `test-ml-extension.html` file to test the extension functionality:
+
+```bash
+# Open the test page in your browser
+open scratch-editor/test-ml-extension.html
+```
+
+### 2. Test Functions Available
+- **Set URL Parameters** - Simulate scratch editor URL with session/project IDs
+- **Test localStorage** - Check what's stored in localStorage
+- **Test API Calls** - Verify API connectivity
+- **Show Status** - Display current extension state
+
+### 3. Console Debugging
+When the extension is loaded, you can access it globally:
 
 ```javascript
-// API endpoint used
-GET /api/guests/session/{session_id}/projects/{project_id}
+// Check extension status
+window.MLExtension.getStatus()
+
+// Manually set project data
+window.MLExtension.setProjectData('session_123', 'project_456')
+
+// Refresh the extension
+window.MLExtension.refreshExtension()
+
+// Check for URL parameters
+window.MLExtension.checkForUrlParams()
 ```
-
-### 2. Dynamic Category Naming
-The extension category name (previously "sample") now dynamically shows the actual project name from your API.
-
-### 3. Persistent Storage
-Project names are stored in localStorage and automatically restored when the extension reloads.
-
-## Usage
-
-### Setting Session and Project IDs
-
-#### Method 1: Using the "set session and project" block
-1. Drag the "set session [SESSION_ID] and project [PROJECT_ID]" block to your workspace
-2. Enter your session ID (e.g., `session_aa3bffbf72c444c5`)
-3. Enter your project ID (e.g., `eff8a1b8-4998-442a-a3a2-2e386ddbc9b8`)
-4. Run the block
-
-#### Method 2: From URL parameters
-The extension automatically extracts session and project IDs from URLs containing:
-- `?sessionId=...&projectId=...`
-- `?session=...&project=...`
-- `/session/.../projects/...`
-
-#### Method 3: Using browser console
-```javascript
-// Set IDs manually
-MLExtension.setIds('session_aa3bffbf72c444c5', 'eff8a1b8-4998-442a-a3a2-2e386ddbc9b8')
-
-// Check current status
-MLExtension.getIds()
-```
-
-### Managing Project Names
-
-#### Refresh Project Name
-```javascript
-// Fetch latest project name from API
-MLExtension.refreshProjectName()
-```
-
-#### Check Project Name Status
-```javascript
-// See if current name matches API
-MLExtension.checkProjectNameStatus()
-```
-
-#### Force UI Refresh
-```javascript
-// Refresh Scratch workspace to show new name
-MLExtension.forceUIRefresh()
-```
-
-#### Set Project Name Manually
-```javascript
-// Set project name manually (for testing)
-MLExtension.setProjectName('My Project Name')
-```
-
-### Testing and Debugging
-
-#### Test API Connection
-```javascript
-// Test if API is accessible
-MLExtension.testConnection()
-```
-
-#### Clear All Data
-```javascript
-// Clear stored session, project, and name data
-MLExtension.clearStorage()
-```
-
-## API Response Format
-
-Your API should return project data in this format:
-
-```json
-{
-  "name": "My Project Name",
-  "description": "Optional project description",
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
-}
-```
-
-**Important**: The extension looks for the `name` field directly in the response, not nested under `data.name`.
 
 ## Troubleshooting
 
-### Project Name Not Updating
-1. **Check API response**: Ensure your API returns the project name in the `name` field
-2. **Verify IDs**: Make sure session and project IDs are correctly set
-3. **Force refresh**: Use `MLExtension.forceUIRefresh()` to update the UI
-4. **Check console**: Look for error messages in the browser console
+### Issue: Extension not loading
+**Symptoms:** No ML blocks visible in Scratch editor
+**Solutions:**
+1. Check browser console for error messages
+2. Verify the extension is registered in `extension-manager.js`
+3. Ensure the VM is properly initialized
 
-### Extension Shows "sample"
-1. **No IDs set**: Set session and project IDs first
-2. **API error**: Check if the API endpoint is accessible
-3. **CORS issues**: Ensure your backend allows requests from the Scratch editor
-4. **Manual override**: Use `MLExtension.setProjectName()` to set a custom name
+### Issue: No session/project ID
+**Symptoms:** Extension shows "No project loaded" errors
+**Solutions:**
+1. Check URL parameters: `?sessionId=...&projectId=...`
+2. Verify localStorage has the correct keys
+3. Use `window.MLExtension.getStatus()` to debug
 
-### Console Errors
-Common errors and solutions:
+### Issue: API calls failing
+**Symptoms:** Prediction blocks return errors
+**Solutions:**
+1. Check network tab for failed requests
+2. Verify API endpoint is accessible
+3. Check CORS configuration
+4. Test API directly with the test page
 
+### Issue: Blocks not updating
+**Symptoms:** Old project labels still showing
+**Solutions:**
+1. Call `window.MLExtension.refreshExtension()`
+2. Check if new project data is available
+3. Refresh the Scratch editor page
+
+## Development
+
+### File Structure
 ```
-"Session ID or Project ID not available"
-→ Set the IDs using MLExtension.setIds()
-
-"API call failed: 404"
-→ Check if the API endpoint exists and IDs are correct
-
-"CORS error detected"
-→ Configure your backend to allow cross-origin requests
+scratch-editor/
+├── packages/
+│   ├── scratch-gui/
+│   │   └── src/
+│   │       └── lib/
+│   │           └── query-parser-hoc.jsx  # URL parameter handling
+│   └── scratch-vm/
+│       └── src/
+│           └── extensions/
+│               └── scratch3_ml/
+│                   ├── index.js          # Main extension code
+│                   └── config.js         # Configuration
 ```
 
-## Testing
+### Key Components
 
-Use the included `test-ml-extension.html` file to test the extension functionality:
+#### QueryParserHOC
+- Automatically runs when Scratch editor loads
+- Extracts URL parameters and saves to localStorage
+- Provides logging for debugging
 
-1. Open the HTML file in your browser
-2. Load the ML extension in Scratch
-3. Use the test interface to verify all functions work correctly
+#### ML3Extension
+- Main extension class
+- Handles project data initialization
+- Creates dynamic blocks
+- Manages API calls
+
+#### Extension Manager
+- Automatically loads ML extension when VM starts
+- Located in `scratch-vm/src/extension-support/extension-manager.js`
+
+### Adding New Features
+
+1. **New Block Types**: Add to `getInfo()` method
+2. **New API Endpoints**: Update API calls in relevant methods
+3. **New Configuration**: Add to `config.js`
+4. **New Debug Methods**: Add to the extension class
+
+## API Endpoints
+
+### Project Information
+```
+GET /api/guests/session/{sessionId}/projects/{projectId}
+```
+
+### Prediction
+```
+POST /api/guests/session/{sessionId}/projects/{projectId}/predict
+Body: { "text": "input text" }
+Response: { "success": true, "label": "predicted_label", "confidence": 85.5 }
+```
 
 ## Configuration
 
-The extension configuration is in `config.js`:
+The extension uses these localStorage keys:
+- `ml_extension_session_id` - Current session ID
+- `ml_extension_project_id` - Current project ID
+- `ml_extension_project_name` - Project name (if available)
+- `ml_extension_url_timestamp` - When parameters were last set
 
-```javascript
-module.exports = {
-    API_BASE_URL: 'http://localhost:8080',  // Your backend URL
-    DEFAULT_PROJECT_NAME: 'sample',          // Fallback name
-    COLOR_PRIMARY: '#4B5566',               // Extension colors
-    COLOR_SECONDARY: '#374151'
-};
-```
+## Best Practices
 
-## Browser Console Functions
+1. **Always check for errors** in API calls
+2. **Use console.log** for debugging
+3. **Handle missing data gracefully** with fallbacks
+4. **Test with different project configurations**
+5. **Monitor network requests** for API issues
 
-All functions are available in the browser console when the extension is loaded:
+## Common Issues and Solutions
 
-- `MLExtension.setIds(sessionId, projectId)`
-- `MLExtension.getIds()`
-- `MLExtension.refreshProjectName()`
-- `MLExtension.checkProjectNameStatus()`
-- `MLExtension.forceUIRefresh()`
-- `MLExtension.setProjectName(name)`
-- `MLExtension.testConnection()`
-- `MLExtension.clearStorage()`
-- `MLExtension.initFromUrl()`
+### CORS Errors
+- Ensure backend allows requests from scratch editor domain
+- Check if preflight requests are handled
 
-## Notes
+### localStorage Not Available
+- Check if running in iframe with restricted access
+- Verify browser supports localStorage
 
-- **UI Updates**: The extension name change may require a page refresh or workspace refresh to be visible
-- **Persistence**: Project names are stored in localStorage and persist between browser sessions
-- **Error Handling**: The extension gracefully falls back to the default name if API calls fail
-- **Async Operations**: Most functions are asynchronous and return promises
+### Extension Not Found
+- Check if extension is properly registered
+- Verify file paths are correct
+- Check for JavaScript errors during loading
 
-## Example Workflow
+### Blocks Not Appearing
+- Ensure `getInfo()` method returns valid block definitions
+- Check if extension is properly loaded in VM
+- Verify block opcodes are unique
 
-1. **Load the extension** in Scratch
-2. **Set session and project IDs** using the block or console
-3. **Extension automatically fetches** the project name from your API
-4. **Category name updates** from "sample" to the actual project name
-5. **Use the ML blocks** with your project-specific data
-6. **Refresh as needed** using the provided functions
+## Support
+
+For issues with the ML extension:
+1. Check browser console for error messages
+2. Use the test page to isolate problems
+3. Verify API endpoints are working
+4. Check localStorage contents
+5. Use debug methods to inspect extension state

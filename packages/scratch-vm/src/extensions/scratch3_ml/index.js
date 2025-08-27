@@ -1,1325 +1,600 @@
 const ArgumentType = require('../../extension-support/argument-type');
 const BlockType = require('../../extension-support/block-type');
 const formatMessage = require('format-message');
-const config = require('./config');
 
-// Global variables
-let SESSION_ID = '';
-let PROJECT_ID = '';
-let PROJECT_NAME = config.DEFAULT_PROJECT_NAME;
-const API_BASE_URL = config.API_BASE_URL;
-
-// Storage utility functions
-function saveToStorage(key, value) {
-    if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(key, value);
-        console.log(`ML Extension: Saved ${key}: ${value}`);
-    }
-}
-
-function loadFromStorage(key) {
-    if (typeof window !== 'undefined' && window.localStorage) {
-        const value = window.localStorage.getItem(key);
-        console.log(`ML Extension: Loaded ${key}: ${value}`);
-        return value;
-    }
-    return null;
-}
-
-function clearStorage() {
-    if (typeof window !== 'undefined' && window.localStorage) {
-        Object.values(config.STORAGE_KEYS).forEach(key => {
-            window.localStorage.removeItem(key);
-        });
-        console.log('ML Extension: Storage cleared');
-    }
-}
-
-// URL parsing function - PRIMARY method for getting session and project IDs
-function extractIdsFromURL() {
-    if (typeof window !== 'undefined' && window.location) {
-        const url = window.location.href;
-        console.log(`ML Extension: Extracting IDs from URL (primary method): ${url}`);
+class ML3Extension {
+    constructor(runtime) {
+        this.runtime = runtime;
+        console.log('ML Extension: CLEAN VERSION LOADED - DYNAMIC BLOCKS');
         
-        // Try multiple URL patterns for sessionId and projectId
-        let sessionMatch = url.match(/[?&]sessionId[=:]([^&\/]+)/);
-        let projectMatch = url.match(/[?&]projectId[=:]([^&\/]+)/);
+        // Initialize with default values to prevent undefined errors
+        this.projectName = 'ML Project';
+        this.projectId = null;
+        this.sessionId = null;
+        this.projectLabels = ['Happy', 'Sad']; // Default labels to prevent undefined errors
+        this.lastPrediction = null; // Store the last prediction result
         
-        if (!sessionMatch) {
-            sessionMatch = url.match(/[?&]session[=:]([^&\/]+)/);
-        }
-        if (!projectMatch) {
-            projectMatch = url.match(/[?&]project[=:]([^&\/]+)/);
+        // Make extension globally accessible for debugging
+        if (typeof window !== 'undefined') {
+            window.MLExtension = this;
+            console.log('ML Extension: Made globally accessible as window.MLExtension');
         }
         
-        if (sessionMatch && projectMatch) {
-            SESSION_ID = sessionMatch[1];
-            PROJECT_ID = projectMatch[1];
+        // Initialize project data
+        this.initializeProjectDataSync();
+        
+        // Set up periodic check for URL parameters (in case they're added after extension loads)
+        if (typeof window !== 'undefined') {
+            setTimeout(() => {
+                this.checkForUrlParams();
+            }, 1000);
+        }
+        
+        // Also run async initialization immediately to get project data
+        this.initializeProjectDataAsync();
+    }
+
+    extractUrlParams() {
+        if (typeof window !== 'undefined' && window.location) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('sessionId');
+            const projectId = urlParams.get('projectId');
             
-            console.log(`ML Extension: Successfully extracted from URL - Session: ${SESSION_ID}, Project: ${PROJECT_ID}`);
-            return true;
-        } else {
-            console.warn('ML Extension: Could not extract session_id and project_id from URL');
-            return false;
-        }
-    }
-    return false;
-}
-
-// Function to force clear all project data and start fresh
-function forceClearAllProjectData() {
-    console.log('ML Extension: Force clearing all project data...');
-    
-    // Clear all stored data
-    clearStorage();
-    
-    // Clear any cached Scratch data
-    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-        try {
-            // Clear the workspace
-            if (window.Scratch.vm.clearWorkspace) {
-                window.Scratch.vm.clearWorkspace();
-                console.log('ML Extension: Scratch workspace cleared');
-            }
-            
-            // Refresh the workspace
-            if (window.Scratch.vm.refreshWorkspace) {
-                window.Scratch.vm.refreshWorkspace();
-                console.log('ML Extension: Scratch workspace refreshed');
-            }
-        } catch (e) {
-            console.log('ML Extension: Could not clear/refresh workspace:', e.message);
-        }
-    }
-    
-    // Re-initialize with URL parameters
-    const urlExtracted = extractIdsFromURL();
-    if (urlExtracted) {
-        console.log(`ML Extension: Successfully re-initialized with URL - Session: ${SESSION_ID}, Project: ${PROJECT_ID}`);
-        
-        // Store new values
-        saveToStorage(config.STORAGE_KEYS.SESSION_ID, SESSION_ID);
-        saveToStorage(config.STORAGE_KEYS.PROJECT_ID, PROJECT_ID);
-        
-        // Fetch new project name
-        fetchProjectName();
-        
-        return true;
-    }
-    
-    return false;
-}
-
-// Function to force refresh extension when URL parameters change
-function forceRefreshForNewProject() {
-    console.log('ML Extension: Force refreshing for new project...');
-    
-    // Clear all stored data
-    clearStorage();
-    
-    // Re-initialize with URL parameters
-    const urlExtracted = extractIdsFromURL();
-    if (urlExtracted) {
-        console.log(`ML Extension: Successfully refreshed with new URL - Session: ${SESSION_ID}, Project: ${PROJECT_ID}`);
-        
-        // Store new values
-        saveToStorage(config.STORAGE_KEYS.SESSION_ID, SESSION_ID);
-        saveToStorage(config.STORAGE_KEYS.PROJECT_ID, PROJECT_ID);
-        
-        // Try to clear Scratch workspace to ensure clean slate
-        if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-            try {
-                // Clear the workspace
-                if (window.Scratch.vm.clearWorkspace) {
-                    window.Scratch.vm.clearWorkspace();
-                    console.log('ML Extension: Scratch workspace cleared for new project');
-                }
+            if (sessionId && projectId) {
+                console.log(`ML Extension: Found URL params - Session: ${sessionId}, Project: ${projectId}`);
                 
-                // Refresh the workspace
-                if (window.Scratch.vm.refreshWorkspace) {
-                    window.Scratch.vm.refreshWorkspace();
-                    console.log('ML Extension: Scratch workspace refreshed for new project');
-                }
-            } catch (e) {
-                console.log('ML Extension: Could not clear/refresh workspace, but extension refreshed:', e.message);
+                // Save to localStorage
+                window.localStorage.setItem('ml_extension_session_id', sessionId);
+                window.localStorage.setItem('ml_extension_project_id', projectId);
+                
+                return { sessionId, projectId };
             }
         }
-        
-        // Fetch new project name
-        fetchProjectName();
-        
-        return true;
+        return null;
     }
-    
-    return false;
-}
 
-// Load IDs from URL FIRST, then localStorage as fallback
-function initializeIds() {
-    // ALWAYS prioritize URL parameters over localStorage
-    console.log(`ML Extension: Initializing - prioritizing URL parameters over localStorage`);
-    
-    // First, try to extract from URL
-    const urlExtracted = extractIdsFromURL();
-    if (urlExtracted) {
-        console.log(`ML Extension: Successfully extracted from URL - Session: ${SESSION_ID}, Project: ${PROJECT_ID}`);
+    checkForUrlParams() {
+        if (!this.sessionId || !this.projectId) {
+            console.log('ML Extension: Checking for URL parameters...');
+            const urlParams = this.extractUrlParams();
+            if (urlParams) {
+                console.log('ML Extension: Found URL parameters, reinitializing...');
+                this.initializeProjectDataAsync();
+            }
+        }
+    }
+
+    // Synchronous initialization - runs immediately
+    initializeProjectDataSync() {
+        console.log('ML Extension: Running synchronous initialization...');
         
-        // ALWAYS clear localStorage when URL parameters are present to ensure fresh start
-        const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-        const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
+        // Set default values to ensure getInfo() works
+        this.projectName = 'ML Project';
+        this.projectId = null;
+        this.sessionId = null;
+        this.projectLabels = ['Happy', 'Sad'];
+        this.lastPrediction = null;
+        this.isReady = false;
         
-        // If we have stored values and they're different from URL values, clear everything
-        if (storedSessionId && storedProjectId && 
-            (storedSessionId !== SESSION_ID || storedProjectId !== PROJECT_ID)) {
-            console.log('ML Extension: URL parameters changed, clearing localStorage to prevent project conflicts');
-            clearStorage();
+        // Mark as ready for basic functionality
+        this.isReady = true;
+        console.log('ML Extension: Synchronous initialization complete');
+    }
+
+    // Asynchronous initialization - runs after constructor
+    async initializeProjectDataAsync() {
+        console.log('ML Extension: Running asynchronous initialization...');
+        
+        if (typeof window !== 'undefined' && window.localStorage) {
+            // First try to get from URL params
+            const urlParams = this.extractUrlParams();
             
-            // Also clear any cached project data
-            if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
+            // Get project data from localStorage or URL params
+            let projectId = window.localStorage.getItem('ml_extension_project_id');
+            let sessionId = window.localStorage.getItem('ml_extension_session_id');
+            
+            if (!projectId || !sessionId) {
+                if (urlParams) {
+                    projectId = urlParams.projectId;
+                    sessionId = urlParams.sessionId;
+                }
+            }
+            
+            if (projectId && sessionId) {
+                this.projectId = projectId;
+                this.sessionId = sessionId;
+                
+                console.log(`ML Extension: Using project data - ID: ${projectId}, Session: ${sessionId}`);
+                
+                // Fetch project data from API
                 try {
-                    // Clear the workspace
-                    if (window.Scratch.vm.clearWorkspace) {
-                        window.Scratch.vm.clearWorkspace();
-                        console.log('ML Extension: Scratch workspace cleared for new project');
-                    }
-                    
-                    // Refresh the workspace
-                    if (window.Scratch.vm.refreshWorkspace) {
-                        window.Scratch.vm.refreshWorkspace();
-                        console.log('ML Extension: Scratch workspace refreshed for new project');
-                    }
-                } catch (e) {
-                    console.log('ML Extension: Could not clear/refresh workspace, but extension refreshed:', e.message);
-                }
-            }
-        }
-        
-        // Store URL values in localStorage for consistency
-        saveToStorage(config.STORAGE_KEYS.SESSION_ID, SESSION_ID);
-        saveToStorage(config.STORAGE_KEYS.PROJECT_ID, PROJECT_ID);
-        
-        // Try to get project name from localStorage if available
-        const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-        if (storedProjectName) {
-            PROJECT_NAME = storedProjectName;
-            console.log(`ML Extension: Using project name from localStorage: ${PROJECT_NAME}`);
-        } else {
-            console.log(`ML Extension: No project name in localStorage, using default: ${PROJECT_NAME}`);
-        }
-        
-        return true;
-    }
-    
-    // If URL extraction failed, fall back to localStorage
-    console.log(`ML Extension: URL extraction failed, falling back to localStorage`);
-    const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-    const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
-    const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-    
-    if (storedSessionId && storedProjectId) {
-        SESSION_ID = storedSessionId;
-        PROJECT_ID = storedProjectId;
-        if (storedProjectName) {
-            PROJECT_NAME = storedProjectName;
-        }
-        console.log(`ML Extension: Fallback to localStorage - Session: ${SESSION_ID}, Project: ${PROJECT_ID}, Name: ${PROJECT_NAME}`);
-        return true;
-    }
-    
-    console.error(`ML Extension: ERROR - No valid session/project data found in URL or localStorage`);
-    return false;
-}
-
-// Function to set session and project IDs manually
-async function setSessionAndProjectIds(sessionId, projectId) {
-    SESSION_ID = sessionId;
-    PROJECT_ID = projectId;
-    
-    // Save to localStorage
-    saveToStorage(config.STORAGE_KEYS.SESSION_ID, SESSION_ID);
-    saveToStorage(config.STORAGE_KEYS.PROJECT_ID, PROJECT_ID);
-    
-    console.log(`ML Extension: IDs set manually - Session: ${SESSION_ID}, Project: ${PROJECT_ID}`);
-    
-    // Fetch project name and update UI
-    const newProjectName = await fetchProjectName();
-    if (newProjectName !== config.DEFAULT_PROJECT_NAME) {
-        PROJECT_NAME = newProjectName;
-        console.log(`ML Extension: Project name updated to: ${PROJECT_NAME}`);
-        
-        // Force UI refresh to show new project name
-        if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-            try {
-                window.Scratch.vm.refreshWorkspace();
-            } catch (e) {
-                console.log('ML Extension: Could not refresh workspace, but project name updated');
-            }
-        }
-    }
-}
-
-// Function to fetch project name from backend
-async function fetchProjectName() {
-    if (!SESSION_ID || !PROJECT_ID) {
-        console.warn('ML Extension: Cannot fetch project name - missing session_id or project_id');
-        return config.DEFAULT_PROJECT_NAME;
-    }
-
-    try {
-        const url = `${API_BASE_URL}/api/guests/session/${SESSION_ID}/projects/${PROJECT_ID}`;
-        console.log(`ML Extension: Fetching project name from: ${url}`);
-        
-        const response = await fetch(url, {
-            method: 'GET', // Using GET as per API specification
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log('ML Extension: Project API response:', data);
-        
-        // Handle the response structure from your API
-        if (data.success && data.data && data.data.name) {
-            const newProjectName = data.data.name;
-            PROJECT_NAME = newProjectName;
-            saveToStorage(config.STORAGE_KEYS.PROJECT_NAME, PROJECT_NAME);
-            console.log(`ML Extension: Project name updated from API to: ${PROJECT_NAME}`);
-            
-            // Force multiple UI refresh attempts to ensure the name updates
-            if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                try {
-                    // Immediate refresh
-                    window.Scratch.vm.refreshWorkspace();
-                    console.log('ML Extension: Workspace refreshed immediately');
-                    
-                    // Delayed refresh to ensure UI updates
-                    setTimeout(() => {
-                        try {
-                            window.Scratch.vm.refreshWorkspace();
-                            console.log('ML Extension: Workspace refreshed after delay');
-                        } catch (e) {
-                            console.log('ML Extension: Delayed refresh failed');
-                        }
-                    }, 500);
-                    
-                    // Force refresh the extension blocks specifically
-                    setTimeout(() => {
-                        try {
-                            const extensionManager = window.Scratch.vm.extensionManager;
-                            if (extensionManager && extensionManager._loadedExtensions.has('ml')) {
-                                // Re-trigger extension info update
-                                window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
-                                console.log('ML Extension: Extension blocks info updated');
-                            }
-                        } catch (e) {
-                            console.log('ML Extension: Could not update extension blocks info');
-                        }
-                    }, 1000);
-                    
-                } catch (e) {
-                    console.log('ML Extension: Could not refresh workspace, but project name updated');
-                }
-            }
-            
-            return PROJECT_NAME;
-        } else {
-            console.warn('ML Extension: No name field in project data, using default');
-            return config.DEFAULT_PROJECT_NAME;
-        }
-    } catch (error) {
-        console.error('ML Extension: Error fetching project name:', error);
-        
-        if (error.message.includes('Failed to fetch') || error.message.includes('CORS')) {
-            console.log('ML Extension: CORS error detected. This usually means:');
-            console.log('  1. Your backend needs CORS configuration for the scratch editor domain');
-            console.log('  2. Or check if the backend URL is correct in config.js');
-            console.log('  3. Or use MLExtension.setProjectName() to set name manually');
-        }
-        
-        return config.DEFAULT_PROJECT_NAME;
-    }
-}
-
-// API helper function
-async function apiCall(endpoint, options = {}) {
-    if (!SESSION_ID || !PROJECT_ID) {
-        throw new Error('Session ID or Project ID not available. Please set them using the extension.');
-    }
-
-    const url = `${API_BASE_URL}/api/guests/session/${SESSION_ID}/projects/${PROJECT_ID}${endpoint}`;
-    console.log(`ML Extension: Making API call to: ${url}`);
-    
-    // Always include session_id and project_id in the payload
-    const defaultPayload = {
-        session_id: SESSION_ID,
-        project_id: PROJECT_ID
-    };
-    
-    const defaultOptions = {
-        method: 'POST', // Default to POST to send payloads
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(defaultPayload),
-        ...options
-    };
-
-    // If body is provided in options, merge it with default payload
-    if (options.body) {
-        try {
-            const customBody = JSON.parse(options.body);
-            defaultOptions.body = JSON.stringify({
-                ...defaultPayload,
-                ...customBody
-            });
-        } catch (e) {
-            console.warn('ML Extension: Could not parse custom body, using default payload');
-        }
-    }
-
-    try {
-        const response = await fetch(url, defaultOptions);
-        if (!response.ok) {
-            throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-        }
-        const result = await response.json();
-        console.log(`ML Extension: API response for ${endpoint}:`, result);
-        console.log(`ML Extension: Response structure analysis:`, {
-            hasSuccess: 'success' in result,
-            successValue: result.success,
-            hasLabel: 'label' in result,
-            labelValue: result.label,
-            hasConfidence: 'confidence' in result,
-            confidenceValue: result.confidence,
-            hasData: 'data' in result,
-            dataType: result.data ? typeof result.data : 'undefined'
-        });
-        return result;
-    } catch (error) {
-        console.error(`ML Extension: API call failed for ${endpoint}:`, error);
-        return { error: error.message, success: false };
-    }
-}
-
-/**
- * Class for the ML extension blocks.
- */
-class MLExtension {
-    constructor() {
-        // Initialize IDs from storage or URL
-        initializeIds();
-        
-        // Try to fetch project name if IDs are available
-        if (SESSION_ID && PROJECT_ID) {
-            // Fetch project name immediately and update UI
-            fetchProjectName().then(newName => {
-                if (newName !== config.DEFAULT_PROJECT_NAME) {
-                    PROJECT_NAME = newName;
-                    console.log(`ML Extension: Project name updated to: ${PROJECT_NAME}`);
-                    
-                    // Force immediate UI refresh to show new name
-                    this.forceImmediateUIRefresh();
-                }
-            }).catch(error => {
-                console.error('ML Extension: Error fetching project name on init:', error);
-            });
-        }
-        
-        // Also check localStorage for project name on initialization
-        const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-        if (storedProjectName && storedProjectName !== config.DEFAULT_PROJECT_NAME) {
-            PROJECT_NAME = storedProjectName;
-            console.log(`ML Extension: Project name loaded from localStorage: ${PROJECT_NAME}`);
-        }
-        
-        console.log(`ML Extension: Initialized with project name: ${PROJECT_NAME}`);
-    }
-    
-    // Force immediate UI refresh with multiple strategies
-    forceImmediateUIRefresh() {
-        if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-            try {
-                // Strategy 1: Immediate workspace refresh
-                window.Scratch.vm.refreshWorkspace();
-                console.log('ML Extension: Immediate workspace refresh completed');
-                
-                // Strategy 2: Force extension blocks update
-                setTimeout(() => {
-                    try {
-                        window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
-                        console.log('ML Extension: Extension blocks info updated');
-                    } catch (e) {
-                        console.log('ML Extension: Could not update extension blocks info');
-                    }
-                }, 100);
-                
-                // Strategy 3: Force extension re-registration
-                setTimeout(() => {
-                    try {
-                        const extensionManager = window.Scratch.vm.extensionManager;
-                        if (extensionManager && extensionManager._loadedExtensions.has('ml')) {
-                            // Remove and re-add the extension to force refresh
-                            extensionManager._loadedExtensions.delete('ml');
-                            extensionManager.loadExtensionIdSync('ml');
-                            console.log('ML Extension: Extension re-registered for fresh display');
+                    const response = await fetch(`https://theneural-backend-ed2fe2fxhq-uc.a.run.app/api/guests/session/${sessionId}/projects/${projectId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.data) {
+                            this.projectName = data.data.name;
+                            this.projectLabels = data.data.dataset?.labels || data.data.model?.labels || [];
+                            console.log(`ML Extension: Project data loaded from API - Name: ${this.projectName}, Labels: ${this.projectLabels.join(', ')}`);
                             
-                            // Final workspace refresh
-                            setTimeout(() => {
-                                try {
-                                    window.Scratch.vm.refreshWorkspace();
-                                    console.log('ML Extension: Final workspace refresh after re-registration');
-                                } catch (e) {
-                                    console.log('ML Extension: Final refresh failed');
-                                }
-                            }, 200);
+                            // Add dynamic label block methods for each label
+                            this.addDynamicLabelMethods();
+                        } else {
+                            this.projectName = 'ML Project';
+                            this.projectLabels = ['Happy', 'Sad'];
+                            console.log('ML Extension: API response not successful, using defaults');
                         }
-                    } catch (e) {
-                        console.log('ML Extension: Could not re-register extension');
+                    } else {
+                        this.projectName = 'ML Project';
+                        this.projectLabels = ['Happy', 'Sad'];
+                        console.log('ML Extension: Failed to fetch project data, using defaults');
                     }
-                }, 300);
-                
-            } catch (e) {
-                console.log('ML Extension: Could not perform immediate UI refresh');
+                } catch (error) {
+                    this.projectName = 'ML Project';
+                    this.projectLabels = ['Happy', 'Sad'];
+                    console.error('ML Extension: Error fetching project data:', error);
+                }
+            } else {
+                this.projectName = 'ML Project';
+                this.projectId = null;
+                this.sessionId = null;
+                this.projectLabels = ['Happy', 'Sad'];
+                console.log('ML Extension: No project data found, using defaults');
             }
+        } else {
+            this.projectName = 'ML Project';
+            this.projectId = null;
+            this.sessionId = null;
+            this.projectLabels = ['Happy', 'Sad'];
         }
+        
+        // Mark as fully ready
+        this.isReady = true;
+        console.log('ML Extension: Asynchronous initialization complete');
     }
 
-    /**
-     * @return {object} This extension's metadata.
-     */
+    addDynamicLabelMethods() {
+        // Add a method for each label from the API
+        this.projectLabels.forEach(label => {
+            this[`label_${label}`] = function(args, util) {
+                console.log(`ML Extension: label_${label} block called`);
+                return label;
+            };
+        });
+    }
+
     getInfo() {
-        // Always get the current project name from localStorage or use default
-        const currentProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME) || PROJECT_NAME || config.DEFAULT_PROJECT_NAME;
+        console.log('ML Extension: getInfo() called - CREATING DYNAMIC BLOCKS');
+        console.log('ML Extension: Current projectLabels:', this.projectLabels);
+        console.log('ML Extension: isReady:', this.isReady);
         
-        console.log(`ML Extension: getInfo() called - Current: ${PROJECT_NAME}, Stored: ${loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME)}, Final: ${currentProjectName}`);
+        // Safety check - if not ready, return basic blocks
+        if (!this.isReady) {
+            console.log('ML Extension: Not ready yet, returning basic blocks');
+            return {
+                id: 'ml',
+                name: 'ML Project',
+                color1: '#4B5566',
+                color2: '#374151',
+                blocks: [
+                    {
+                        opcode: 'waitForReady',
+                        blockType: BlockType.COMMAND,
+                        text: formatMessage({
+                            id: 'ml.waitForReady',
+                            default: 'wait for ML extension to be ready',
+                            description: 'Wait for the ML extension to finish loading'
+                        })
+                    }
+                ],
+                menus: {}
+            };
+        }
+        
+        // Ensure projectLabels is always an array to prevent map errors
+        const labels = Array.isArray(this.projectLabels) ? this.projectLabels : ['Happy', 'Sad'];
+        
+        // Create dynamic label blocks based on API response
+        const dynamicLabelBlocks = labels.map(label => ({
+            opcode: `label_${label}`,
+            blockType: BlockType.REPORTER,
+            text: formatMessage({
+                id: `ml.label_${label}`,
+                default: label,
+                description: `Represents the "${label}" label from your project`
+            })
+        }));
+        
+        // Only the 2 main blocks plus dynamic label blocks
+        const allBlocks = [
+            {
+                opcode: 'recogniseTextLabel',
+                blockType: BlockType.REPORTER,
+                text: formatMessage({
+                    id: 'ml.recogniseTextLabel',
+                    default: 'recognise text [TEXT] (label)',
+                    description: 'Recognise text and return the predicted label'
+                }),
+                arguments: {
+                    TEXT: {
+                        type: ArgumentType.STRING,
+                        defaultValue: 'text'
+                    }
+                }
+            },
+            {
+                opcode: 'recogniseTextConfidence',
+                blockType: BlockType.REPORTER,
+                text: formatMessage({
+                    id: 'ml.recogniseTextConfidence',
+                    default: 'recognise text [TEXT] (confidence)',
+                    description: 'Recognise text and return the confidence score'
+                }),
+                arguments: {
+                    TEXT: {
+                        type: ArgumentType.STRING,
+                        defaultValue: 'text'
+                    }
+                }
+            },
+            ...dynamicLabelBlocks
+        ];
+        
+        console.log(`ML Extension: Project: ${this.projectName}, Labels: ${labels.join(', ')}, Total blocks: ${allBlocks.length}`);
         
         return {
             id: 'ml',
-            name: currentProjectName, // Use the most up-to-date name
-            color1: config.COLOR_PRIMARY,
-            color2: config.COLOR_SECONDARY,
-        blocks: [
-            {
-                    opcode: 'recogniseTextLabel',
-                blockType: BlockType.REPORTER,
-                    text: formatMessage({
-                        id: 'ml.recogniseTextLabel',
-                        default: 'recognise text [TEXT] (label)',
-                        description: 'Recognise text and return the predicted label'
-                    }),
-                arguments: {
-                        TEXT: {
-                        type: ArgumentType.STRING,
-                            defaultValue: 'text'
-                    }
-                }
-            },
-            {
-                    opcode: 'recogniseTextConfidence',
-                blockType: BlockType.REPORTER,
-                    text: formatMessage({
-                        id: 'ml.recogniseTextConfidence',
-                        default: 'recognise text [TEXT] (confidence)',
-                        description: 'Recognise text and return the confidence score'
-                    }),
-                arguments: {
-                        TEXT: {
-                        type: ArgumentType.STRING,
-                            defaultValue: 'text'
-                        }
-                    }
-                },
-            {
-                opcode: 'addTrainingData',
-                blockType: BlockType.COMMAND,
-                    text: formatMessage({
-                        id: 'ml.addTrainingData',
-                        default: 'add training data [TEXT] [LABEL]',
-                        description: 'Add training data with text and label'
-                    }),
-                arguments: {
-                        TEXT: {
-                        type: ArgumentType.STRING,
-                            defaultValue: 'text'
-                    },
-                        LABEL: {
-                        type: ArgumentType.STRING,
-                        defaultValue: 'Happy'
-                    }
-                }
-            },
-            {
-                opcode: 'trainModel',
-                blockType: BlockType.COMMAND,
-                    text: formatMessage({
-                        id: 'ml.trainModel',
-                        default: 'train new machine learning model',
-                        description: 'Train a new machine learning model'
-                    })
-            },
-            {
-                opcode: 'isModelReady',
-                blockType: BlockType.BOOLEAN,
-                    text: formatMessage({
-                        id: 'ml.isModelReady',
-                        default: 'is the machine learning model [STATUS]',
-                        description: 'Check if the model has the specified status'
-                    }),
-                    arguments: {
-                        STATUS: {
-                            type: ArgumentType.STRING,
-                            defaultValue: 'ready',
-                            menu: 'modelStatus'
-                        }
-                    }
-                },
-                {
-                    opcode: 'getTrainingExamples',
-                    blockType: BlockType.REPORTER,
-                    text: formatMessage({
-                        id: 'ml.getTrainingExamples',
-                        default: 'get training examples',
-                        description: 'Get all training examples'
-                    })
-                },
-                '---', // Separator
-                {
-                    opcode: 'setSessionAndProject',
-                    blockType: BlockType.COMMAND,
-                    text: formatMessage({
-                        id: 'ml.setSessionAndProject',
-                        default: 'set session [SESSION_ID] and project [PROJECT_ID]',
-                        description: 'Set session and project IDs'
-                    }),
-                    arguments: {
-                        SESSION_ID: {
-                            type: ArgumentType.STRING,
-                            defaultValue: 'session_aa3bffbf72c444c5'
-                        },
-                        PROJECT_ID: {
-                            type: ArgumentType.STRING,
-                            defaultValue: 'eff8a1b8-4998-442a-a3a2-2e386ddbc9b8'
-                        }
-                    }
-                },
-                {
-                    opcode: 'getCurrentIds',
-                    blockType: BlockType.REPORTER,
-                    text: formatMessage({
-                        id: 'ml.getCurrentIds',
-                        default: 'get current session and project IDs',
-                        description: 'Get current session and project IDs'
-                    })
-                },
-                {
-                    opcode: 'clearStoredData',
-                    blockType: BlockType.COMMAND,
-                    text: formatMessage({
-                        id: 'ml.clearStoredData',
-                        default: 'clear stored data',
-                        description: 'Clear stored session and project data'
-                    })
-                }
-            ],
-            menus: {
-                modelStatus: {
-                    acceptReporters: true,
-                    items: ['ready', 'training', 'trained', 'error']
-                }
-            }
+            name: this.projectName,
+            color1: '#4B5566',
+            color2: '#374151',
+            blocks: allBlocks,
+            menus: {}
         };
     }
 
-    // Block implementations
-    async recogniseTextLabel(args) {
+    async recogniseTextLabel(args, util) {
         const text = args.TEXT;
+        console.log(`ML Extension: recogniseTextLabel called with text: "${text}"`);
+        
+        if (!this.sessionId || !this.projectId) {
+            console.warn('ML Extension: Missing session or project ID for prediction');
+            return 'Error: No project loaded';
+        }
+        
         try {
-            const result = await apiCall('/predict', {
+            console.log(`ML Extension: Making prediction API call to: /api/guests/session/${this.sessionId}/projects/${this.projectId}/predict`);
+            
+            // Make API call to get prediction using the correct endpoint
+            const response = await fetch(`https://theneural-backend-ed2fe2fxhq-uc.a.run.app/api/guests/session/${this.sessionId}/projects/${this.projectId}/predict`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({
                     text: text
                 })
             });
             
-            console.log('ML Extension: recogniseTextLabel result:', result);
-            
-            // Handle the actual API response structure
-            if (result.success && result.label) {
-                return result.label;
-            } else if (result.success && result.data && result.data.prediction) {
-                // Fallback to nested structure
-                return result.data.prediction.label || 'unknown';
-            } else if (result.success && result.data && result.data.label) {
-                // Another possible structure
-                return result.data.label;
+            if (response.ok) {
+                const data = await response.json();
+                console.log('ML Extension: Prediction response:', data);
+                
+                if (data.success && data.label) {
+                    // Store the last prediction
+                    this.lastPrediction = data.label;
+                    return data.label;
+                } else {
+                    console.warn('ML Extension: No label in response:', data);
+                    this.lastPrediction = 'Unknown';
+                    return 'Unknown';
+                }
             } else {
-                console.warn('ML Extension: Unexpected response structure:', result);
-                return 'unknown';
+                console.error('ML Extension: Prediction failed:', response.status);
+                this.lastPrediction = 'Error: Prediction failed';
+                return 'Error: Prediction failed';
             }
         } catch (error) {
-            console.error('ML Extension: Error in recogniseTextLabel:', error);
-            return 'error';
+            console.error('ML Extension: Error in prediction:', error);
+            return 'Error: Network error';
         }
     }
 
-    async recogniseTextConfidence(args) {
+    async recogniseTextConfidence(args, util) {
         const text = args.TEXT;
+        console.log(`ML Extension: recogniseTextConfidence called with text: "${text}"`);
+        
+        if (!this.sessionId || !this.projectId) {
+            console.warn('ML Extension: Missing session or project ID for prediction');
+            return 0;
+        }
+        
         try {
-            const result = await apiCall('/predict', {
+            console.log(`ML Extension: Making confidence API call to: /api/guests/session/${this.sessionId}/projects/${this.projectId}/predict`);
+            
+            // Make API call to get prediction using the correct endpoint
+            const response = await fetch(`https://theneural-backend-ed2fe2fxhq-uc.a.run.app/api/guests/session/${this.sessionId}/projects/${this.projectId}/predict`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({
                     text: text
                 })
             });
             
-            console.log('ML Extension: recogniseTextConfidence result:', result);
-            
-            // Handle the actual API response structure - same as recogniseTextLabel
-            if (result.success && result.confidence !== undefined) {
-                // API returns confidence as percentage (e.g., 52.86), so return as is
-                return result.confidence;
-            } else if (result.success && result.data && result.data.prediction) {
-                // Fallback to nested structure
-                return result.data.prediction.confidence || 0;
-            } else if (result.success && result.data && result.data.confidence !== undefined) {
-                // Another possible structure
-                return result.data.confidence;
+            if (response.ok) {
+                const data = await response.json();
+                console.log('ML Extension: Confidence response:', data);
+                
+                if (data.success && data.confidence !== undefined) {
+                    // Store the last prediction with confidence
+                    this.lastPrediction = `${data.label || 'Unknown'} (${data.confidence}%)`;
+                    return data.confidence;
+                } else {
+                    console.warn('ML Extension: No confidence in response:', data);
+                    this.lastPrediction = 'Unknown (0%)';
+                    return 0;
+                }
             } else {
-                console.warn('ML Extension: Unexpected response structure for confidence:', result);
+                console.error('ML Extension: Confidence request failed:', response.status);
+                this.lastPrediction = 'Error: Request failed';
                 return 0;
             }
         } catch (error) {
-            console.error('ML Extension: Error in recogniseTextConfidence:', error);
+            console.error('ML Extension: Error getting confidence:', error);
             return 0;
         }
     }
 
-    async addTrainingData(args) {
-        const text = args.TEXT;
-        const label = args.LABEL;
-        try {
-            const result = await apiCall('/examples', {
-                body: JSON.stringify({
-                    text: text,
-                    label: label
-                })
-            });
-            
-            if (result.success) {
-                console.log(`ML Extension: Training data added - Text: ${text}, Label: ${label}`);
-            } else {
-                console.error('ML Extension: Failed to add training data:', result);
-            }
-        } catch (error) {
-            console.error('ML Extension: Error in addTrainingData:', error);
-        }
-    }
-
-    async trainModel() {
-        try {
-            const result = await apiCall('/train', {
-                body: JSON.stringify({})
-            });
-            
-            if (result.success) {
-                console.log('ML Extension: Model training started');
-            } else {
-                console.error('ML Extension: Failed to start training:', result);
-            }
-        } catch (error) {
-            console.error('ML Extension: Error in trainModel:', error);
-        }
-    }
-
-    async isModelReady(args) {
-        const status = args.STATUS.toLowerCase();
-        try {
-            const result = await apiCall('/train', {
-                body: JSON.stringify({
-                    check_status: true,
-                    expected_status: status
-                })
-            });
-            
-            if (result.success && result.data && result.data.status) {
-                const currentStatus = result.data.status.toLowerCase();
-                return currentStatus === status;
-            }
-            return false;
-        } catch (error) {
-            console.error('ML Extension: Error in isModelReady:', error);
-            return false;
-        }
-    }
-
-    async getTrainingExamples() {
-        try {
-            const result = await apiCall('/examples', {
-                body: JSON.stringify({
-                    get_examples: true
-                })
-            });
-            
-            if (result.success && result.data && Array.isArray(result.data)) {
-                return JSON.stringify(result.data);
-            }
-            return '[]';
-        } catch (error) {
-            console.error('ML Extension: Error in getTrainingExamples:', error);
-            return '[]';
-        }
-    }
-
-    // Utility blocks
-    async setSessionAndProject(args) {
+    // Block implementation for setting project data
+    setProjectData(args, util) {
         const sessionId = args.SESSION_ID;
         const projectId = args.PROJECT_ID;
-        await setSessionAndProjectIds(sessionId, projectId);
-    }
-
-    getCurrentIds() {
-        return JSON.stringify({
-            sessionId: SESSION_ID,
-            projectId: PROJECT_ID,
-            projectName: PROJECT_NAME
-        });
-    }
-
-    clearStoredData() {
-        clearStorage();
-        SESSION_ID = '';
-        PROJECT_ID = '';
-        PROJECT_NAME = config.DEFAULT_PROJECT_NAME;
-        console.log('ML Extension: All stored data cleared');
-    }
-}
-
-// Function to check for localStorage vs URL mismatches
-function checkForMismatches() {
-    if (typeof window !== 'undefined' && window.location) {
-        const url = window.location.href;
-        const urlSessionMatch = url.match(/[?&]sessionId[=:]([^&\/]+)/);
-        const urlProjectMatch = url.match(/[?&]projectId[=:]([^&\/]+)/);
         
-        if (urlSessionMatch && urlProjectMatch) {
-            const urlSessionId = urlSessionMatch[1];
-            const urlProjectId = urlProjectMatch[1];
+        if (sessionId && projectId) {
+            this.sessionId = sessionId;
+            this.projectId = projectId;
             
-            const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-            const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
-            
-            if (storedSessionId && storedProjectId) {
-                if (storedSessionId !== urlSessionId || storedProjectId !== urlProjectId) {
-                    console.log('ML Extension: URL vs localStorage comparison:');
-                    console.log('URL parameters:', { sessionId: urlSessionId, projectId: urlProjectId });
-                    console.log('localStorage values:', { sessionId: storedSessionId, projectId: storedProjectId });
-                    console.log('Note: URL parameters take priority. localStorage values may be outdated.');
-                    console.log('The extension will use URL parameters for API calls.');
-                } else {
-                    console.log('ML Extension: URL and localStorage values are in sync');
-                }
+            // Save to localStorage
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.setItem('ml_extension_session_id', sessionId);
+                window.localStorage.setItem('ml_extension_project_id', projectId);
             }
+            
+            console.log(`ML Extension: Block set project data - Session: ${sessionId}, Project: ${projectId}`);
+            
+            // Re-fetch project data
+            this.initializeProjectDataAsync();
         }
     }
-}
 
-// Initialize extension
-const extensionObject = new MLExtension();
+    // Block implementation for getting project name
+    getProjectName(args, util) {
+        return this.projectName || 'ML Project';
+    }
 
-// Always clear old project data on initialization to prevent conflicts
-console.log('ML Extension: Initializing - clearing any old project data...');
-clearStorage();
-
-// Add URL change listener to automatically detect project changes
-if (typeof window !== 'undefined') {
-    let currentUrl = window.location.href;
-    
-    // Check for URL changes every second
-    setInterval(() => {
-        if (window.location.href !== currentUrl) {
-            console.log('ML Extension: URL changed, checking for new project...');
-            currentUrl = window.location.href;
-            
-            // Check if session or project ID changed
-            const newUrlExtracted = extractIdsFromURL();
-            if (newUrlExtracted && (SESSION_ID !== extensionObject.getIds().sessionId || PROJECT_ID !== extensionObject.getIds().projectId)) {
-                console.log('ML Extension: New project detected, refreshing extension...');
-                forceRefreshForNewProject();
-            }
+    // Block implementation for getting project labels
+    getProjectLabels(args, util) {
+        if (Array.isArray(this.projectLabels) && this.projectLabels.length > 0) {
+            return this.projectLabels.join(', ');
         }
-    }, 1000);
-    
-    console.log('ML Extension: URL change listener initialized');
-}
+        return 'Happy, Sad';
+    }
 
-// Set up periodic refresh of extension name from both localStorage and API
-setInterval(() => {
-    // Check localStorage first
-    const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-    if (storedProjectName && storedProjectName !== PROJECT_NAME) {
-        console.log(`ML Extension: Project name changed from "${PROJECT_NAME}" to "${storedProjectName}"`);
-        PROJECT_NAME = storedProjectName;
+    // Debug method to manually set session and project IDs (for console use)
+    setProjectDataManually(sessionId, projectId) {
+        if (sessionId && projectId) {
+            this.sessionId = sessionId;
+            this.projectId = projectId;
+            
+            // Save to localStorage
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.setItem('ml_extension_session_id', sessionId);
+                window.localStorage.setItem('ml_extension_project_id', projectId);
+            }
+            
+            console.log(`ML Extension: Manually set project data - Session: ${sessionId}, Project: ${projectId}`);
+            
+            // Re-fetch project data
+            this.initializeProjectDataAsync();
+        }
+    }
+
+    // Block implementation for refreshing the extension
+    refreshExtension(args, util) {
+        console.log('ML Extension: Refreshing extension from block...');
+        this.initializeProjectDataAsync();
         
-        // Try to refresh the workspace to show new name
-        if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-            try {
-                window.Scratch.vm.refreshWorkspace();
-                console.log('ML Extension: Workspace refreshed to show new project name');
-            } catch (e) {
-                console.log('ML Extension: Could not refresh workspace, but project name updated');
-            }
+        // Notify the runtime that the extension has changed
+        if (this.runtime && this.runtime.emit) {
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
         }
     }
-    
-    // Also periodically fetch from API if we have valid session/project IDs
-    if (SESSION_ID && PROJECT_ID) {
-        fetchProjectName().then(apiProjectName => {
-            if (apiProjectName && apiProjectName !== config.DEFAULT_PROJECT_NAME && apiProjectName !== PROJECT_NAME) {
-                console.log(`ML Extension: Project name updated from API periodic check: "${PROJECT_NAME}" -> "${apiProjectName}"`);
-                PROJECT_NAME = apiProjectName;
-                
-                // Try to refresh the workspace
-                if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                    try {
-                        window.Scratch.vm.refreshWorkspace();
-                        console.log('ML Extension: Workspace refreshed after API periodic check');
-                    } catch (e) {
-                        console.log('ML Extension: Could not refresh workspace after API check');
-                    }
-                }
-            }
-        }).catch(error => {
-            console.warn('ML Extension: Periodic API check failed:', error);
-        });
-    }
-}, 5000); // Check every 5 seconds
 
-// Add global functions for testing from browser console
-if (typeof window !== 'undefined') {
-    window.MLExtension = {
-        setIds: setSessionAndProjectIds,
-        getIds: () => ({ 
-            sessionId: SESSION_ID, 
-            projectId: PROJECT_ID, 
-            projectName: PROJECT_NAME 
-        }),
-        testConnection: async () => {
-            try {
-                if (!SESSION_ID || !PROJECT_ID) {
-                    return 'No session/project IDs set';
-                }
-                const response = await apiCall('', { 
-                    body: JSON.stringify({ test_connection: true })
-                });
-                return response;
-            } catch (error) {
-                return { error: error.message };
-            }
-        },
-        setApiUrl: (url) => {
-            console.log(`ML Extension: Note - API URL is configured in config.js: ${url}`);
-        },
-        clearStorage: clearStorage,
-        initFromUrl: () => {
-            initializeIds();
-            if (SESSION_ID && PROJECT_ID) {
-                fetchProjectName();
-            }
-        },
-        refreshProjectName: async () => {
-            if (SESSION_ID && PROJECT_ID) {
-                const newName = await fetchProjectName();
-                return { success: true, projectName: newName };
-            } else {
-                return { success: false, error: 'No session or project ID set' };
-            }
-        },
-        forceUIRefresh: () => {
-            if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                try {
-                    window.Scratch.vm.refreshWorkspace();
-                    return { success: true, message: 'Workspace refreshed' };
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            } else {
-                return { success: false, error: 'Scratch VM not available' };
-            }
-        },
-        setProjectName: (name) => {
-            if (name && typeof name === 'string') {
-                PROJECT_NAME = name;
-                saveToStorage(config.STORAGE_KEYS.PROJECT_NAME, PROJECT_NAME);
-                console.log(`ML Extension: Project name manually set to: ${PROJECT_NAME}`);
-                return { success: true, projectName: PROJECT_NAME };
-            } else {
-                return { success: false, error: 'Invalid project name' };
-            }
-        },
-        checkProjectNameStatus: async () => {
-            if (!SESSION_ID || !PROJECT_ID) {
-                return { success: false, error: 'No session or project ID set' };
-            }
-            
-            try {
-                const url = `${API_BASE_URL}/api/guests/session/${SESSION_ID}/projects/${PROJECT_ID}`;
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.success && result.data) {
-                    const apiProjectName = result.data.name || 'unknown';
-                    const isCurrent = apiProjectName === PROJECT_NAME;
-                    
-                    return {
-                        success: true,
-                        currentName: PROJECT_NAME,
-                        apiName: apiProjectName,
-                        isCurrent: isCurrent,
-                        needsUpdate: !isCurrent
-                    };
-                } else {
-                    return { success: false, error: 'API call failed' };
-                }
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
-        },
-        testCORS: async () => {
-            const testUrls = [
-                `${API_BASE_URL}/api/guests/session/test/projects/test`
-            ];
-            
-            const results = [];
-            
-            for (const url of testUrls) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    
-                    results.push({
-                        url: url,
-                        status: response.status,
-                        cors: response.headers.get('Access-Control-Allow-Origin') || 'Not set',
-                        success: true
-                    });
-                } catch (error) {
-                    results.push({
-                        url: url,
-                        status: 'Error',
-                        cors: 'N/A',
-                        success: false,
-                        error: error.message
-                    });
-                }
-            }
-            
-            return {
-                success: true,
-                results: results,
-                currentConfig: API_BASE_URL,
-                recommendation: results.find(r => r.success && r.cors !== 'Not set') 
-                    ? 'Backend is accessible and CORS is configured' 
-                    : 'Configure CORS in your backend for the scratch editor domain'
-            };
-        },
-        syncWithUrl: () => {
-            // Force sync localStorage with URL parameters (primary method)
-            const url = window.location.href;
-            const urlSessionMatch = url.match(/[?&]sessionId[=:]([^&\/]+)/);
-            const urlProjectMatch = url.match(/[?&]projectId[=:]([^&\/]+)/);
-            
-            if (urlSessionMatch && urlProjectMatch) {
-                const urlSessionId = urlSessionMatch[1];
-                const urlProjectId = urlProjectMatch[1];
-                
-                // Update localStorage with URL values
-                saveToStorage(config.STORAGE_KEYS.SESSION_ID, urlSessionId);
-                saveToStorage(config.STORAGE_KEYS.PROJECT_ID, urlProjectId);
-                
-                // Update global variables
-                SESSION_ID = urlSessionId;
-                PROJECT_ID = urlProjectId;
-                
-                console.log('ML Extension: Synced with URL parameters:', {
-                    sessionId: urlSessionId,
-                    projectId: urlProjectId
-                });
-                
-                // Try to fetch project name
-                fetchProjectName();
-                
-                return { success: true, message: 'Synced with URL parameters' };
-            } else {
-                return { success: false, error: 'No URL parameters found' };
-            }
-        },
-        forceUseLocalStorage: () => {
-            // Force the extension to use localStorage values (fallback method)
-            const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-            const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
-            const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-            
-            if (storedSessionId && storedProjectId) {
-                SESSION_ID = storedSessionId;
-                PROJECT_ID = storedProjectId;
-                PROJECT_NAME = storedProjectName || config.DEFAULT_PROJECT_NAME;
-                
-                console.log('ML Extension: Forced to use localStorage values (fallback):', {
-                    sessionId: SESSION_ID,
-                    projectId: PROJECT_ID,
-                    projectName: PROJECT_NAME
-                });
-                
-                return { success: true, message: 'Using localStorage values' };
-            } else {
-                return { success: false, error: 'No localStorage data found' };
-            }
-        },
-        forceRefreshForNewProject: () => {
-            // Force refresh for new project (clears localStorage and re-initializes)
-            return forceRefreshForNewProject();
-        },
-        forceClearAllProjectData: () => {
-            // Force clear all project data and start completely fresh
-            return forceClearAllProjectData();
-        },
-        manualRefresh: () => {
-            // Manual refresh function for users to call from console
-            console.log('ML Extension: Manual refresh requested by user...');
-            
-            // Clear everything and start fresh
-            clearStorage();
-            
-            // Re-initialize
-            const success = initializeIds();
-            
-            if (success) {
-                console.log('ML Extension: Manual refresh successful!');
-                return { success: true, message: 'Extension manually refreshed successfully' };
-            } else {
-                console.log('ML Extension: Manual refresh failed');
-                return { success: false, error: 'Manual refresh failed - check console for details' };
-            }
-        },
-        getStatus: () => {
-            // Get comprehensive status of the extension
-            const url = window.location.href;
-            const urlSessionMatch = url.match(/[?&]sessionId[=:]([^&\/]+)/);
-            const urlProjectMatch = url.match(/[?&]projectId[=:]([^&\/]+)/);
-            
-            const urlSessionId = urlSessionMatch ? urlSessionMatch[1] : null;
-            const urlProjectId = urlProjectMatch ? urlProjectMatch[1] : null;
-            
-            const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-            const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
-            const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-            
-            const hasMismatch = (storedSessionId && storedProjectId) && 
-                               (storedSessionId !== urlSessionId || storedProjectId !== urlProjectId);
-            
-            return {
-                current: {
-                    sessionId: SESSION_ID,
-                    projectId: PROJECT_ID,
-                    projectName: PROJECT_NAME
-                },
-                localStorage: {
-                    sessionId: storedSessionId,
-                    projectId: storedProjectId,
-                    projectName: storedProjectName
-                },
-                url: {
-                    sessionId: urlSessionId,
-                    projectId: urlProjectId
-                },
-                hasMismatch: hasMismatch,
-                priority: 'URL parameters take priority over localStorage',
-                recommendation: hasMismatch ? 
-                    'URL parameters take priority. Use MLExtension.forceUseLocalStorage() if you need localStorage values' : 
-                    'All values are in sync'
-            };
-        },
-        updateExtensionName: () => {
-            // Force update the extension name in Scratch
-            const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-            if (storedProjectName) {
-                PROJECT_NAME = storedProjectName;
-                console.log(`ML Extension: Project name updated to: ${PROJECT_NAME}`);
-                
-                // Try to refresh the Scratch workspace to show new name
-                if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                    try {
-                        // Force refresh of the extension blocks
-                        window.Scratch.vm.refreshWorkspace();
-                        console.log('ML Extension: Workspace refreshed to show new project name');
-                        return { success: true, message: 'Extension name updated and workspace refreshed', projectName: PROJECT_NAME };
-                    } catch (e) {
-                        console.log('ML Extension: Could not refresh workspace, but project name updated');
-                        return { success: true, message: 'Extension name updated but workspace refresh failed', projectName: PROJECT_NAME, error: e.message };
-                    }
-                } else {
-                    return { success: true, message: 'Extension name updated but Scratch VM not available', projectName: PROJECT_NAME };
-                }
-            } else {
-                return { success: false, error: 'No project name found in localStorage' };
-            }
-        },
-        refreshExtensionDisplay: () => {
-            // Comprehensive refresh of extension display
-            const storedProjectName = loadFromStorage(config.STORAGE_KEYS.PROJECT_NAME);
-            const storedProjectId = loadFromStorage(config.STORAGE_KEYS.PROJECT_ID);
-            const storedSessionId = loadFromStorage(config.STORAGE_KEYS.SESSION_ID);
-            
-            if (storedProjectName && storedProjectId && storedSessionId) {
-                // Update global variables
-                PROJECT_NAME = storedProjectName;
-                PROJECT_ID = storedProjectId;
-                SESSION_ID = storedSessionId;
-                
-                console.log('ML Extension: All values refreshed from localStorage:', {
-                    projectName: PROJECT_NAME,
-                    projectId: PROJECT_ID,
-                    sessionId: SESSION_ID
-                });
-                
-                // Try to refresh Scratch workspace
-                if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                    try {
-                        window.Scratch.vm.refreshWorkspace();
-                        console.log('ML Extension: Workspace refreshed with new values');
-                        return { success: true, message: 'Extension refreshed and workspace updated' };
-                    } catch (e) {
-                        console.log('ML Extension: Could not refresh workspace, but values updated');
-                        return { success: true, message: 'Extension refreshed but workspace update failed', error: e.message };
-                    }
-                } else {
-                    return { success: true, message: 'Extension refreshed but Scratch VM not available' };
-                }
-            } else {
-                return { success: false, error: 'Missing required data in localStorage' };
-            }
-        },
-        testPredictResponse: async (text = 'test') => {
-            // Test function to debug API response parsing
-            try {
-                const result = await apiCall('/predict', {
-                    body: JSON.stringify({ text: text })
-                });
-                
-                console.log('ML Extension: Test predict response:', result);
-                
-                // Test different parsing approaches
-                const testResults = {
-                    original: result,
-                    directLabel: result.success && result.label ? result.label : 'NOT_FOUND',
-                    directConfidence: result.success && result.confidence !== undefined ? result.confidence : 'NOT_FOUND',
-                    nestedLabel: result.success && result.data && result.data.prediction ? result.data.prediction.label : 'NOT_FOUND',
-                    nestedConfidence: result.success && result.data && result.data.prediction ? result.data.prediction.confidence : 'NOT_FOUND'
-                };
-                
-                console.log('ML Extension: Parsing test results:', testResults);
-                
-                return {
-                    success: true,
-                    apiResponse: result,
-                    parsingResults: testResults,
-                    recommendation: result.success && result.label ? 
-                        'Use direct properties (result.label, result.confidence)' : 
-                        'Check response structure - may need nested properties'
-                };
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
-        },
-        forceUpdateProjectName: async () => {
-            // Force update project name from API and refresh UI
-            if (!SESSION_ID || !PROJECT_ID) {
-                return { success: false, error: 'No session or project ID available' };
-            }
-            
-            try {
-                console.log('ML Extension: Force updating project name from API...');
-                const newProjectName = await fetchProjectName();
-                
-                if (newProjectName && newProjectName !== config.DEFAULT_PROJECT_NAME) {
-                    PROJECT_NAME = newProjectName;
-                    
-                    // Force multiple UI refreshes
-                    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-                        try {
-                            // Immediate refresh
-                            window.Scratch.vm.refreshWorkspace();
-                            
-                            // Delayed refreshes
-                            setTimeout(() => window.Scratch.vm.refreshWorkspace(), 500);
-                            setTimeout(() => window.Scratch.vm.refreshWorkspace(), 1000);
-                            setTimeout(() => {
-                                window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
-                                console.log('ML Extension: Extension blocks info updated');
-                            }, 1500);
-                            
-                            console.log('ML Extension: UI refresh attempts completed');
-                        } catch (e) {
-                            console.warn('ML Extension: UI refresh failed:', e);
-                        }
-                    }
-                    
-                    return {
-                        success: true,
-                        projectName: newProjectName,
-                        message: 'Project name updated and UI refresh attempted'
-                    };
-                } else {
-                    return {
-                        success: false,
-                        error: 'Failed to fetch valid project name from API'
-                    };
-                }
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
+    // Block implementation for checking if extension is ready
+    isExtensionReady(args, util) {
+        return !!(this.sessionId && this.projectId && this.projectLabels && this.projectLabels.length > 0);
+    }
+
+    // Block implementation for getting session ID
+    getSessionId(args, util) {
+        return this.sessionId || 'No session ID set';
+    }
+
+    // Block implementation for getting project ID
+    getProjectId(args, util) {
+        return this.projectId || 'No project ID set';
+    }
+
+    // Block implementation for clearing project data
+    clearProjectData(args, util) {
+        console.log('ML Extension: Clearing project data from block...');
+        
+        // Clear project data
+        this.sessionId = null;
+        this.projectId = null;
+        this.projectName = 'ML Project';
+        this.projectLabels = ['Happy', 'Sad'];
+        this.lastPrediction = null;
+        
+        // Clear localStorage
+        if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.removeItem('ml_extension_session_id');
+            window.localStorage.removeItem('ml_extension_project_id');
+            window.localStorage.removeItem('ml_extension_project_name');
         }
-    };
-    
-    console.log('ML Extension: Global functions available at window.MLExtension');
-    console.log('ML Extension: Available functions:');
-    console.log('  - MLExtension.setIds(sessionId, projectId)');
-    console.log('  - MLExtension.getIds()');
-    console.log('  - MLExtension.testConnection()');
-    console.log('  - MLExtension.clearStorage()');
-    console.log('  - MLExtension.initFromUrl()');
-    console.log('  - MLExtension.refreshProjectName()');
-    console.log('  - MLExtension.forceUIRefresh()');
-    console.log('  - MLExtension.setProjectName(name)');
-    console.log('  - MLExtension.checkProjectNameStatus()');
-    console.log('  - MLExtension.testCORS()');
-    console.log('  - MLExtension.syncWithUrl() - Sync localStorage with URL parameters (primary)');
-    console.log('  - MLExtension.forceUseLocalStorage() - Force use localStorage values (fallback)');
-    console.log('  - MLExtension.forceRefreshForNewProject() - Force refresh for new project (clears localStorage and re-initializes)');
-    console.log('  - MLExtension.forceClearAllProjectData() - Force clear all project data and start completely fresh');
-    console.log('  - MLExtension.manualRefresh() - Manual refresh function for users to call from console');
-    console.log('  - MLExtension.getStatus() - Get comprehensive extension status');
-    console.log('  - MLExtension.updateExtensionName() - Update extension name in Scratch');
-    console.log('  - MLExtension.refreshExtensionDisplay() - Refresh entire extension display');
-    console.log('  - MLExtension.testPredictResponse(text) - Test API response parsing');
-    console.log('  - MLExtension.forceUpdateProjectName() - Force update project name from API');
+        
+        console.log('ML Extension: Project data cleared');
+    }
+
+    // Block implementation for testing API connection
+    async testAPIConnection(args, util) {
+        console.log('ML Extension: Testing API connection from block...');
+        
+        if (!this.sessionId || !this.projectId) {
+            console.warn('ML Extension: Cannot test API without session and project IDs');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`https://theneural-backend-ed2fe2fxhq-uc.a.run.app/api/guests/session/${this.sessionId}/projects/${this.projectId}`);
+            if (response.ok) {
+                console.log('ML Extension: API connection test successful');
+            } else {
+                console.warn(`ML Extension: API connection test failed with status ${response.status}`);
+            }
+        } catch (error) {
+            console.error('ML Extension: API connection test error:', error);
+        }
+    }
+
+    // Block implementation for waiting for extension to be ready
+    waitForReady(args, util) {
+        console.log('ML Extension: waitForReady block called');
+        
+        if (this.isReady) {
+            console.log('ML Extension: Extension is already ready');
+            return;
+        }
+        
+        // Wait a bit and check again
+        setTimeout(() => {
+            if (this.isReady) {
+                console.log('ML Extension: Extension is now ready');
+            } else {
+                console.log('ML Extension: Extension still not ready');
+            }
+        }, 1000);
+    }
+
+    // Method to force extension to be ready (for debugging)
+    forceReady() {
+        console.log('ML Extension: Force setting extension to ready');
+        this.isReady = true;
+        this.projectLabels = this.projectLabels || ['Happy', 'Sad'];
+        
+        // Notify runtime that extension has changed
+        if (this.runtime && this.runtime.emit) {
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
+        }
+    }
+
+    // Method to manually trigger async initialization (for debugging)
+    async manualInit() {
+        console.log('ML Extension: Manual initialization triggered');
+        await this.initializeProjectDataAsync();
+        
+        // Force refresh the extension
+        if (this.runtime && this.runtime.emit) {
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
+        }
+    }
+
+    // Method to manually set project labels (for debugging)
+    setProjectLabels(labels) {
+        console.log('ML Extension: Manually setting project labels:', labels);
+        this.projectLabels = Array.isArray(labels) ? labels : ['Happy', 'Sad'];
+        this.isReady = true;
+        
+        // Force refresh the extension
+        if (this.runtime && this.runtime.emit) {
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
+        }
+    }
+
+    // Method to manually set project data for testing
+    setProjectDataForTesting(sessionId, projectId) {
+        console.log('ML Extension: Setting project data for testing:', { sessionId, projectId });
+        this.sessionId = sessionId;
+        this.projectId = projectId;
+        
+        // Save to localStorage
+        if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem('ml_extension_session_id', sessionId);
+            window.localStorage.setItem('ml_extension_project_id', projectId);
+        }
+        
+        // Re-fetch project data
+        this.initializeProjectDataAsync();
+    }
+
+    // Block implementation for getting last prediction
+    getLastPrediction(args, util) {
+        return this.lastPrediction || 'No predictions yet';
+    }
+
+    // Block implementation for showing status in console
+    showStatus(args, util) {
+        const status = this.getStatus();
+        console.log('ML Extension Status:', status);
+        console.log('ML Extension: Session ID:', status.sessionId);
+        console.log('ML Extension: Project ID:', status.projectId);
+        console.log('ML Extension: Project Name:', status.projectName);
+        console.log('ML Extension: Project Labels:', status.projectLabels);
+        console.log('ML Extension: Last Prediction:', status.lastPrediction);
+    }
+
+    // Debug method to get current status
+    getStatus() {
+        return {
+            sessionId: this.sessionId,
+            projectId: this.projectId,
+            projectName: this.projectName,
+            projectLabels: this.projectLabels,
+            lastPrediction: this.lastPrediction,
+            isReady: this.isReady,
+            localStorage: {
+                sessionId: typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem('ml_extension_session_id') : null,
+                projectId: typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem('ml_extension_project_id') : null
+            }
+        };
+    }
+
+    // Debug method to check what's happening
+    debugState() {
+        console.log('=== ML Extension Debug State ===');
+        console.log('isReady:', this.isReady);
+        console.log('projectLabels:', this.projectLabels);
+        console.log('projectLabels type:', typeof this.projectLabels);
+        console.log('projectLabels isArray:', Array.isArray(this.projectLabels));
+        console.log('projectLabels length:', this.projectLabels ? this.projectLabels.length : 'undefined');
+        console.log('sessionId:', this.sessionId);
+        console.log('projectId:', this.projectId);
+        console.log('projectName:', this.projectName);
+        console.log('lastPrediction:', this.lastPrediction);
+        console.log('================================');
+    }
+
+    // Method to refresh the extension (useful when new project data is loaded)
+    refreshExtension() {
+        console.log('ML Extension: Refreshing extension...');
+        this.initializeProjectDataAsync();
+        
+        // Force ready state and notify the runtime that the extension has changed
+        this.isReady = true;
+        if (this.runtime && this.runtime.emit) {
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
+        }
+    }
 }
 
-console.log(`ML Extension: Extension loaded with project name: ${PROJECT_NAME}`);
-console.log(`ML Extension: Session ID: ${SESSION_ID || 'Not set'}`);
-console.log(`ML Extension: Project ID: ${PROJECT_ID || 'Not set'}`);
-
-module.exports = MLExtension;
+module.exports = ML3Extension;

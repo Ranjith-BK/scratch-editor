@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teachable Machine Extension Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .icon-preview {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin: 20px 0;
+        }
+        .icon-large {
+            width: 48px;
+            height: 48px;
+            background: #4FFF50;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+            text-align: center;
+        }
+        .icon-small {
+            width: 24px;
+            height: 24px;
+            background: #4FFF50;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 8px;
+            text-align: center;
+        }
+        .neural-network {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            width: 100%;
+            height: 100%;
+            padding: 4px;
+        }
+        .node {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 6px;
+        }
+        .node-small {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4px;
+        }
+        .connection {
+            position: absolute;
+            background: white;
+            height: 1px;
+        }
+        .connection.horizontal {
+            width: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .connection.vertical {
+            width: 1px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .test-button {
+            background: #4FFF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #45E645;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Teachable Machine Extension Test</h1>
+    
+    <div class="test-section">
+        <h2>Extension Icons</h2>
+        <div class="icon-preview">
+            <div>
+                <h3>Large Icon (48x48)</h3>
+                <div class="icon-large">
+                    <div class="neural-network">
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                        <div class="node">N</div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h3>Small Icon (24x24)</h3>
+                <div class="icon-small">
+                    <div class="neural-network">
+                        <div class="node-small">N</div>
+                        <div class="node-small">N</div>
+                        <div class="node-small">N</div>
+                        <div class="node-small">N</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p>These icons represent the neural network concept for the Teachable Machine extension.</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Extension Functionality Test</h2>
+        <p>Test the Teachable Machine extension blocks and functionality:</p>
+        
+        <button class="test-button" onclick="testUseModel()">Test use model [url]</button>
+        <button class="test-button" onclick="testWhenModelDetects()">Test when model detects [label]</button>
+        <button class="test-button" onclick="testModelPrediction()">Test model prediction</button>
+        <button class="test-button" onclick="testPredictionIs()">Test prediction is [label]</button>
+        <button class="test-button" onclick="testConfidenceFor()">Test confidence for [label]</button>
+        <button class="test-button" onclick="testTurnVideo()">Test turn video [state]</button>
+        <button class="test-button" onclick="testSetVideoTransparency()">Test set video transparency</button>
+        
+        <div id="testResults"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>URL Parameter Test</h2>
+        <p>Test URL parameter extraction for teachableLink:</p>
+        <input type="text" id="testUrl" placeholder="Enter Teachable Machine URL" style="width: 100%; padding: 10px; margin: 10px 0;">
+        <button class="test-button" onclick="testURLParameter()">Test URL Parameter</button>
+        <div id="urlTestResults"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Extension Integration</h2>
+        <p>This extension will be automatically loaded when Scratch starts and will:</p>
+        <ul>
+            <li>Load TensorFlow.js and Teachable Machine libraries</li>
+            <li>Automatically detect teachableLink from URL parameters</li>
+            <li>Load the model and extract labels from metadata</li>
+            <li>Initialize webcam for pose detection</li>
+            <li>Provide real-time predictions</li>
+            <li>Update dropdown menus with actual model labels</li>
+        </ul>
+    </div>
+
+    <script>
+        // Mock extension functions for testing
+        let mockModel = null;
+        let mockWebcam = null;
+        let mockLabels = ['class1', 'class2', 'class3'];
+        let mockPrediction = null;
+        let mockConfidence = 0.85;
+
+        function addStatus(message, type = 'info') {
+            const results = document.getElementById('testResults');
+            const status = document.createElement('div');
+            status.className = `status ${type}`;
+            status.textContent = message;
+            results.appendChild(status);
+        }
+
+        function testUseModel() {
+            addStatus('Testing use model [url] block...', 'info');
+            // Simulate model loading
+            setTimeout(() => {
+                mockModel = { loaded: true };
+                addStatus('Model loaded successfully!', 'success');
+            }, 1000);
+        }
+
+        function testWhenModelDetects() {
+            addStatus('Testing when model detects [label] block...', 'info');
+            if (mockModel && mockPrediction) {
+                addStatus('Model detection working!', 'success');
+            } else {
+                addStatus('Model not loaded or no prediction available', 'error');
+            }
+        }
+
+        function testModelPrediction() {
+            addStatus('Testing model prediction block...', 'info');
+            mockPrediction = { label: 'class1', confidence: mockConfidence };
+            addStatus(`Current prediction: ${mockPrediction.label} (${(mockPrediction.confidence * 100).toFixed(1)}%)`, 'success');
+        }
+
+        function testPredictionIs() {
+            addStatus('Testing prediction is [label] block...', 'info');
+            if (mockPrediction && mockPrediction.label === 'class1') {
+                addStatus('Prediction check working!', 'success');
+            } else {
+                addStatus('Prediction check failed', 'error');
+            }
+        }
+
+        function testConfidenceFor() {
+            addStatus('Testing confidence for [label] block...', 'info');
+            if (mockPrediction && mockPrediction.label === 'class1') {
+                addStatus(`Confidence for class1: ${(mockPrediction.confidence * 100).toFixed(1)}%`, 'success');
+            } else {
+                addStatus('Confidence check failed', 'error');
+            }
+        }
+
+        function testTurnVideo() {
+            addStatus('Testing turn video [state] block...', 'info');
+            mockWebcam = { state: 'on' };
+            addStatus('Video state changed!', 'success');
+        }
+
+        function testSetVideoTransparency() {
+            addStatus('Testing set video transparency block...', 'info');
+            addStatus('Video transparency set to 50%', 'success');
+        }
+
+        function testURLParameter() {
+            const url = document.getElementById('testUrl').value;
+            const results = document.getElementById('urlTestResults');
+            results.innerHTML = '';
+            
+            if (url) {
+                const status = document.createElement('div');
+                status.className = 'status success';
+                status.textContent = `URL parameter test: ${url}`;
+                results.appendChild(status);
+                
+                // Simulate loading model from URL
+                setTimeout(() => {
+                    const loadStatus = document.createElement('div');
+                    loadStatus.className = 'status info';
+                    loadStatus.textContent = 'Model loading from URL...';
+                    results.appendChild(loadStatus);
+                }, 500);
+            } else {
+                const status = document.createElement('div');
+                status.className = 'status error';
+                status.textContent = 'Please enter a URL to test';
+                results.appendChild(status);
+            }
+        }
+
+        // Auto-test on page load
+        window.addEventListener('load', () => {
+            addStatus('Teachable Machine Extension Test Page Loaded', 'info');
+            addStatus('Extension will automatically detect teachableLink from URL parameters', 'info');
+        });
+    </script>
+</body>
+</html>
