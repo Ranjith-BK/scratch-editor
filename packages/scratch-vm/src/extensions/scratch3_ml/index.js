@@ -13,6 +13,7 @@ class ML3Extension {
         this.sessionId = null;
         this.projectLabels = ['Happy', 'Sad']; // Default labels to prevent undefined errors
         this.lastPrediction = null; // Store the last prediction result
+        this.isRefreshing = false; // Prevent duplicate refreshes
         
         // Make extension globally accessible for debugging
         if (typeof window !== 'undefined') {
@@ -76,9 +77,8 @@ class ML3Extension {
         this.lastPrediction = null;
         this.isReady = false;
         
-        // Mark as ready for basic functionality
-        this.isReady = true;
-        console.log('ML Extension: Synchronous initialization complete');
+        // Don't mark as ready until we have real data
+        console.log('ML Extension: Synchronous initialization complete - waiting for API data');
     }
 
     // Asynchronous initialization - runs after constructor
@@ -154,12 +154,16 @@ class ML3Extension {
 
     addDynamicLabelMethods() {
         // Add a method for each label from the API
+        const self = this; // Store reference to 'this'
         this.projectLabels.forEach(label => {
-            this[`label_${label}`] = function(args, util) {
+            // Use arrow function to preserve 'this' context, or use 'self'
+            this[`label_${label}`] = (args, util) => {
                 console.log(`ML Extension: label_${label} block called`);
                 return label;
             };
         });
+        
+        console.log('ML Extension: Dynamic label methods added for:', this.projectLabels);
     }
 
     getInfo() {
@@ -594,6 +598,55 @@ class ML3Extension {
         if (this.runtime && this.runtime.emit) {
             this.runtime.emit('EXTENSION_ADDED', 'ml');
         }
+    }
+
+    // Method to force refresh with new labels
+    forceRefreshWithLabels(labels) {
+        console.log('ML Extension: Force refreshing with labels:', labels);
+        
+        // Prevent duplicate refreshes
+        if (this.isRefreshing) {
+            console.log('ML Extension: Already refreshing, skipping...');
+            return;
+        }
+        
+        this.isRefreshing = true;
+        
+        // Update labels
+        this.projectLabels = Array.isArray(labels) ? labels : ['Happy', 'Sad'];
+        this.isReady = true;
+        
+        // Add dynamic methods for new labels
+        this.addDynamicLabelMethods();
+        
+        // Notify runtime that extension has changed
+        if (this.runtime && this.runtime.emit) {
+            console.log('ML Extension: Emitting EXTENSION_ADDED event');
+            this.runtime.emit('EXTENSION_ADDED', 'ml');
+        }
+        
+        // Reset refresh flag after a delay
+        setTimeout(() => {
+            this.isRefreshing = false;
+        }, 1000);
+        
+        console.log('ML Extension: Extension refreshed with labels:', this.projectLabels);
+    }
+
+    // Method to check if a label method exists
+    hasLabelMethod(label) {
+        return typeof this[`label_${label}`] === 'function';
+    }
+
+    // Method to list all available label methods
+    listLabelMethods() {
+        const methods = [];
+        this.projectLabels.forEach(label => {
+            if (this.hasLabelMethod(label)) {
+                methods.push(`label_${label}`);
+            }
+        });
+        return methods;
     }
 }
 
