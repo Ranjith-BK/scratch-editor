@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Deploy to Cloud Run
 Write-Host "Deploying to Cloud Run..." -ForegroundColor Yellow
-gcloud run deploy $ServiceName --image $ImageName --platform managed --region $Region --allow-unauthenticated --port 8080 --memory 1Gi --cpu 1 --max-instances 10 --set-env-vars NODE_ENV=production
+gcloud run deploy $ServiceName --image $ImageName --platform managed --region $Region --allow-unauthenticated --port 8080 --memory 2Gi --cpu 2 --max-instances 10 --set-env-vars NODE_ENV=production
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Deployment failed" -ForegroundColor Red
