@@ -11,12 +11,17 @@ let currentPrediction = null;
 let confidenceThreshold = 0.8;
 let teachableLink = '';
 let isDetecting = false;
-let detectionCallbacks = new Map();
 let runtime = null;
 let videoEnabled = false;
 let predictionInterval = null;
-let lastTriggeredLabels = new Set(); // Track which labels were triggered to avoid spam
-let registeredLabels = new Set(); // Track which labels have already been registered to prevent duplicates
+let lastUpdate = null;
+let isPredicting = 0;
+let modelConfidences = {};
+let predictionState = {};
+
+// Constants
+const INTERVAL = 33; // Video refresh rate
+const DIMENSIONS = [480, 360]; // Dimensions of the video frame
 
 // Load TensorFlow.js and Teachable Machine libraries
 function loadTeachableMachineLibraries() {
@@ -59,12 +64,6 @@ async function loadModel(url) {
             const response = await fetch(metadataURL);
             const metadata = await response.json();
             if (metadata.labels && Array.isArray(metadata.labels)) {
-                // Clear old callbacks before setting new labels
-                detectionCallbacks.clear();
-                lastTriggeredLabels.clear();
-                registeredLabels.clear();
-                console.log('Teachable Machine: Cleared old detection callbacks, trigger history, and registered labels');
-                
                 // Store original labels and create formatted versions for display
                 originalLabels = metadata.labels;
                 modelLabels = metadata.labels;
@@ -91,124 +90,197 @@ async function loadModel(url) {
         console.log('Teachable Machine: Model loaded successfully');
         console.log('Teachable Machine: Labels:', modelLabels);
         
+        // Clear any existing error notifications
+        clearModelErrors();
+        
         return true;
     } catch (error) {
         console.error('Teachable Machine: Failed to load model:', error);
         isModelLoaded = false;
+        
+        // Show user-friendly error message
+        let errorMessage = 'Failed to load model.';
+        
+        if (error.message && error.message.includes('404')) {
+            errorMessage = 'Model not found. Please check if the URL is correct and the model exists.';
+        } else if (error.message && error.message.includes('status code')) {
+            errorMessage = 'Model server error. Please try again later.';
+        } else if (error.message && error.message.includes('network')) {
+            errorMessage = 'Network error. Please check your internet connection.';
+        }
+        
+        showModelError(errorMessage);
         return false;
     }
 }
 
-// Make prediction using Scratch's video system or webcam
-async function predict() {
-    if (!isModelLoaded || !videoEnabled) return null;
+// Main prediction loop - this is the key to making it work like MIT RAISE Playground
+function predictionLoop() {
+    if (!isModelLoaded || !videoEnabled) {
+        setTimeout(predictionLoop, Math.max(100, INTERVAL));
+        return;
+    }
+
+    const time = Date.now();
+    if (lastUpdate === null) {
+        lastUpdate = time;
+    }
     
+    const offset = time - lastUpdate;
+
+    // Only run predictions at the specified interval
+    if (offset > INTERVAL && isPredicting === 0) {
     try {
         let frame = null;
         
-        // Try to get frame from Scratch's video system first
+            // First try Scratch's video system
         if (runtime && runtime.ioDevices && runtime.ioDevices.video) {
+                try {
+                    // Try different frame formats to get the best one for Teachable Machine
+                    
+                                        // First try to get a canvas format (most compatible)
             try {
                 frame = runtime.ioDevices.video.getFrame({
                     format: 'canvas',
-                    dimensions: [200, 200]
-                });
-            } catch (e) {
-                console.log('Teachable Machine: Could not get frame from Scratch video system:', e.message);
-            }
-        }
-        
-        // If no frame from Scratch, try to use webcam directly
-        if (!frame && window.webcam && window.webcam.canvas) {
-            frame = window.webcam.canvas;
-        }
-        
-        // If still no frame, try to create a webcam if not exists
-        if (!frame && !window.webcam && navigator.mediaDevices) {
-            try {
-                console.log('Teachable Machine: Setting up webcam for predictions...');
-                await window.setupTeachableMachineWebcam();
-                if (window.webcam && window.webcam.canvas) {
-                    frame = window.webcam.canvas;
+                            dimensions: DIMENSIONS
+                        });
+                    } catch (canvasError) {
+                        // Try image-data format
+                    }
+                    
+                    // If canvas failed, try image-data
+                    if (!frame) {
+                        try {
+                            frame = runtime.ioDevices.video.getFrame({
+                                format: 'image-data',
+                                dimensions: DIMENSIONS
+                            });
+                        } catch (imageDataError) {
+                            // Try default format
+                        }
+                    }
+                    
+                    // If still no frame, try default format
+                    if (!frame) {
+                        try {
+                            frame = runtime.ioDevices.video.getFrame({
+                                dimensions: DIMENSIONS
+                            });
+                        } catch (defaultError) {
+                            // All formats failed
+                        }
+                    }
+                } catch (scratchError) {
+                    // Scratch video system failed
                 }
-            } catch (e) {
-                console.log('Teachable Machine: Could not setup webcam:', e.message);
+            }
+            
+            // If Scratch video failed, try fallback webcam
+            if (!frame && window.webcam && window.webcam.canvas) {
+                try {
+                    frame = window.webcam.canvas;
+                } catch (webcamError) {
+                    // Fallback webcam failed
             }
         }
         
         if (frame) {
-            // Get prediction directly from the image frame
-            const prediction = await model.predict(frame);
+                lastUpdate = time;
+                isPredicting = 1;
+                predictAllBlocks(frame);
+                isPredicting = 0;
+            }
+        } catch (e) {
+            isPredicting = 0;
+        }
+    }
+
+    setTimeout(predictionLoop, Math.max(50, INTERVAL));
+}
+
+// Predict all blocks for the current frame
+async function predictAllBlocks(frame) {
+    if (!model || !isModelLoaded) return;
+
+    try {
+        // Convert Scratch video frame to a format that Teachable Machine can handle
+        let imageElement = null;
+        
+        if (frame && frame.data) {
+            // If we have ImageData, convert it to a canvas
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = frame.width || DIMENSIONS[0];
+                canvas.height = frame.height || DIMENSIONS[1];
+                const ctx = canvas.getContext('2d');
+                ctx.putImageData(frame, 0, 0);
+                imageElement = canvas;
+            } catch (canvasError) {
+                console.warn('Teachable Machine: Could not convert ImageData to canvas:', canvasError.message);
+            }
+        } else if (frame && frame instanceof HTMLCanvasElement) {
+            // If it's already a canvas, use it directly
+            imageElement = frame;
+        } else if (frame && frame instanceof HTMLVideoElement) {
+            // If it's a video element, use it directly
+            imageElement = frame;
+        } else if (frame && frame instanceof ImageBitmap) {
+            // If it's an ImageBitmap, convert to canvas
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = frame.width;
+                canvas.height = frame.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(frame, 0, 0);
+                imageElement = canvas;
+            } catch (bitmapError) {
+                console.warn('Teachable Machine: Could not convert ImageBitmap to canvas:', bitmapError.message);
+            }
+        }
+        
+        if (!imageElement) {
+            console.warn('Teachable Machine: Could not convert frame to usable format');
+            return;
+        }
+        
+        // Now predict using the converted image element
+        const prediction = await model.predict(imageElement);
             
             // Find highest confidence prediction
             let highestConfidence = 0;
             let bestPrediction = null;
             
             for (let i = 0; i < prediction.length; i++) {
-                if (prediction[i].probability > highestConfidence) {
-                    highestConfidence = prediction[i].probability;
+            const probability = prediction[i].probability;
+            const className = prediction[i].className;
+            
+            // Update confidence for reporter block
+            modelConfidences[className] = probability;
+            
+            if (probability > highestConfidence) {
+                highestConfidence = probability;
                     bestPrediction = {
-                        label: prediction[i].className,
-                        confidence: prediction[i].probability
+                    label: className,
+                    confidence: probability
                     };
                 }
             }
             
             currentPrediction = bestPrediction;
             
-            // Log current prediction for debugging
-            if (bestPrediction) {
-                console.log(`Teachable Machine: Current prediction: ${bestPrediction.label} (${(bestPrediction.confidence * 100).toFixed(1)}%)`);
-            }
-            
-            // Trigger detection events for hat blocks
-            if (bestPrediction && bestPrediction.confidence >= confidenceThreshold) {
-                // Check if we should trigger this label (avoid spam)
-                const label = bestPrediction.label;
-                const shouldTrigger = !lastTriggeredLabels.has(label);
-                
-                if (shouldTrigger) {
-                    console.log(`Teachable Machine: Triggering detection for label: ${label} with confidence: ${bestPrediction.confidence}`);
-                    
-                    // Trigger all callbacks for this label
-                    for (const [callbackKey, callbackData] of detectionCallbacks.entries()) {
-                        if (callbackData.label === label) {
-                            try {
-                                callbackData.callback(bestPrediction);
-                            } catch (e) {
-                                console.error(`Teachable Machine: Error in callback for ${label}:`, e);
-                            }
-                        }
-                    }
-                    
-                    // Trigger the Scratch block using the main trigger function
-                    if (typeof triggerScratchBlock === 'function') {
-                        triggerScratchBlock(label, bestPrediction);
-                    }
-                    
-                    // Mark this label as recently triggered
-                    lastTriggeredLabels.add(label);
-                    
-                    // Clear the label from triggered set after a delay to allow re-triggering
-                    setTimeout(() => {
-                        lastTriggeredLabels.delete(label);
-                    }, 2000); // 2 second cooldown
-                }
-            }
-            
-            return bestPrediction;
+                    // Store current prediction
+        if (bestPrediction) {
+            // Prediction stored for hat block evaluation
         }
-        return null;
+            
     } catch (error) {
         console.error('Teachable Machine: Prediction failed:', error);
-        return null;
     }
 }
 
 // Get confidence for specific label
 function getConfidenceForLabel(label) {
-    if (!currentPrediction || currentPrediction.label !== label) return 0;
-    return currentPrediction.confidence;
+    return modelConfidences[label] || 0;
 }
 
 // Check if prediction matches label
@@ -219,40 +291,60 @@ function isPrediction(label) {
 
 // Turn video on/off using Scratch's video system
 async function setVideoState(state) {
-    if (!runtime || !runtime.ioDevices || !runtime.ioDevices.video) {
-        console.error('Teachable Machine: Video system not available');
-        return;
-    }
-    
     try {
         if (state === 'on') {
-            // Try to enable video with error handling
+            // First try Scratch's video system
+            if (runtime && runtime.ioDevices && runtime.ioDevices.video) {
             try {
                 await runtime.ioDevices.video.enableVideo();
                 videoEnabled = true;
                 isDetecting = true;
-                console.log('Teachable Machine: Video enabled and detection started');
+                    console.log('Teachable Machine: Scratch video system enabled and detection started');
+                    return;
             } catch (videoError) {
                 console.warn('Teachable Machine: Could not enable Scratch video system:', videoError.message);
-                
-                // Fallback: try to setup webcam directly
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    try {
-                        console.log('Teachable Machine: Attempting to setup webcam directly...');
-                        await window.setupTeachableMachineWebcam();
-                        videoEnabled = true;
-                        isDetecting = true;
-                        console.log('Teachable Machine: Webcam setup successful, detection started');
-                    } catch (webcamError) {
-                        console.error('Teachable Machine: Webcam setup also failed:', webcamError.message);
-                        throw webcamError;
-                    }
-                } else {
-                    throw videoError;
                 }
             }
+                
+            // Fallback: setup our own webcam
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    try {
+                    console.log('Teachable Machine: Setting up fallback webcam...');
+                    const success = await setupFallbackWebcam();
+                    if (success) {
+                        videoEnabled = true;
+                        isDetecting = true;
+                        console.log('Teachable Machine: Fallback webcam setup successful, detection started');
+                        return;
+                    }
+                    } catch (webcamError) {
+                    console.error('Teachable Machine: Fallback webcam setup failed:', webcamError.message);
+                    }
+                }
+            
+            // If we get here, both methods failed
+            throw new Error('Could not enable video with any method');
+            
         } else {
+            // Turn off video
+            if (runtime && runtime.ioDevices && runtime.ioDevices.video) {
+                try {
             runtime.ioDevices.video.disableVideo();
+                } catch (e) {
+                    console.warn('Teachable Machine: Could not disable Scratch video:', e.message);
+                }
+            }
+            
+            // Stop fallback webcam
+            if (window.webcam && window.webcam.stream) {
+                try {
+                    window.webcam.stream.getTracks().forEach(track => track.stop());
+                    window.webcam = null;
+                } catch (e) {
+                    console.warn('Teachable Machine: Could not stop fallback webcam:', e.message);
+                }
+            }
+            
             videoEnabled = false;
             isDetecting = false;
             console.log('Teachable Machine: Video disabled and detection stopped');
@@ -281,6 +373,70 @@ function setVideoTransparency(value) {
     }
 }
 
+// Fallback webcam setup function
+async function setupFallbackWebcam() {
+    if (window.webcam && window.webcam.stream && window.webcam.stream.active) {
+        console.log('Teachable Machine: Fallback webcam already active');
+        return true;
+    }
+    
+    try {
+        console.log('Teachable Machine: Setting up fallback webcam...');
+        
+        // Create video element
+        const video = document.createElement('video');
+        video.width = DIMENSIONS[0];
+        video.height = DIMENSIONS[1];
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        
+        // Get user media
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                width: { ideal: DIMENSIONS[0] },
+                height: { ideal: DIMENSIONS[1] },
+                facingMode: 'user'
+            },
+            audio: false
+        });
+        
+        video.srcObject = stream;
+        
+        // Create canvas for predictions
+        const canvas = document.createElement('canvas');
+        canvas.width = DIMENSIONS[0];
+        canvas.height = DIMENSIONS[1];
+        const ctx = canvas.getContext('2d');
+        
+        // Store webcam reference
+        window.webcam = {
+            video: video,
+            canvas: canvas,
+            stream: stream,
+            ctx: ctx
+        };
+        
+        // Start drawing frames to canvas
+        function drawFrame() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, DIMENSIONS[0], DIMENSIONS[1]);
+            }
+            requestAnimationFrame(drawFrame);
+        }
+        
+        video.onloadedmetadata = () => {
+            drawFrame();
+            console.log('Teachable Machine: Fallback webcam setup complete');
+        };
+        
+        return true;
+    } catch (error) {
+        console.error('Teachable Machine: Failed to setup fallback webcam:', error);
+        return false;
+    }
+}
+
 // Get URL parameters - improved to handle multiple formats
 function getURLParameter(name) {
     // Try multiple ways to get the parameter
@@ -302,122 +458,203 @@ function getURLParameter(name) {
     return value;
 }
 
+// Extract project ID from Teachable Machine URL
+function extractProjectId(url) {
+    if (!url) return null;
+    
+    try {
+        // Handle both full URLs and just project IDs
+        if (url.includes('teachablemachine.withgoogle.com/models/')) {
+            // Extract project ID from full URL - get everything after /models/ and before the next /
+            const match = url.match(/teachablemachine\.withgoogle\.com\/models\/([^\/\?]+)/);
+            if (match && match[1] && match[1].length > 3) {
+                return match[1];
+            }
+        } else {
+            // Assume it's just a project ID
+            const projectId = url.trim();
+            if (projectId.length > 3) {
+                return projectId;
+            }
+        }
+        } catch (e) {
+        console.warn('Teachable Machine: Could not extract project ID from URL:', e.message);
+    }
+    
+    return null;
+}
+
+// Construct full Teachable Machine URL from project ID
+function constructTeachableMachineURL(projectId) {
+    if (!projectId) return null;
+    
+    const baseURL = 'https://teachablemachine.withgoogle.com/models/';
+    return baseURL + projectId + '/';
+}
+
 // Initialize extension with URL parameters
 function initializeFromURL() {
     const link = getURLParameter('teachableLink');
-    if (link && link !== 'https://teachablemachine.withgoogle.com/models/your-model-id/') {
-        console.log('Teachable Machine: Auto-loading model from URL:', link);
-        loadModel(link);
+    if (link) {
+        console.log('Teachable Machine: Found teachableLink parameter:', link);
+        
+        // Extract project ID from the URL
+        const projectId = extractProjectId(link);
+        if (projectId) {
+            // Construct the full URL
+            const fullURL = constructTeachableMachineURL(projectId);
+            console.log('Teachable Machine: Extracted project ID:', projectId);
+            console.log('Teachable Machine: Constructed full URL:', fullURL);
+            
+            // Store the project ID globally for use in blocks
+            window.teachableMachineProjectId = projectId;
+            window.teachableMachineFullURL = fullURL;
+            
+            // Auto-load the model
+            loadModel(fullURL);
+            
+                    // Force refresh the extension blocks to show the new URL
+        setTimeout(() => {
+            if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
+                try {
+                    window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
+                    
+                    // Also try to update the block text directly
+                    updateUseModelBlockText(fullURL);
+                } catch (e) {
+                    // Silent fail
+                }
+            }
+        }, 100);
+            } else {
+            console.error('Teachable Machine: Could not extract project ID from URL parameter');
+            handleNoModelFound();
+        }
     } else {
-        // Try to load the model from your example URL
-        const exampleUrl = 'https://teachablemachine.withgoogle.com/models/-Y0Sh0vSa/';
-        console.log('Teachable Machine: No valid teachableLink found in URL, trying example URL:', exampleUrl);
-        loadModel(exampleUrl);
+        console.error('Teachable Machine: No teachableLink parameter found in URL');
+        handleNoModelFound();
     }
 }
 
-// Test function to manually set labels for debugging
-function setTestLabels() {
-    // Clear old callbacks first
-    detectionCallbacks.clear();
-    lastTriggeredLabels.clear();
-    registeredLabels.clear();
-    console.log('Teachable Machine: Cleared old detection callbacks, trigger history, and registered labels');
-    
-    modelLabels = ['Ranjith', 'Usha'];
-    console.log('Teachable Machine: Test labels set:', modelLabels);
+// Handle case when no valid model URL is found
+function handleNoModelFound() {
+    console.error('Teachable Machine: No valid model URL found. Please check the teachableLink parameter.');
+    isModelLoaded = false;
+    setDefaultLabels();
+    showModelError('No valid model URL found. Please check the teachableLink parameter.');
+}
+
+// Show model error message in the UI
+function showModelError(message) {
+    try {
+        // Try to show error in Scratch's notification system
+    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
+        try {
+                // Try to use Scratch's built-in notification system
+                if (window.Scratch.vm.emit) {
+                    window.Scratch.vm.emit('SHOW_NOTIFICATION', {
+                        message: `Teachable Machine: ${message}`,
+                        type: 'error'
+                    });
+                }
+        } catch (e) {
+                // Fallback: create a custom error notification
+                createCustomErrorNotification(message);
+            }
+        } else {
+            // Fallback: create a custom error notification
+            createCustomErrorNotification(message);
+        }
+    } catch (error) {
+        // Last resort: console error
+        console.error('Teachable Machine Error:', message);
+    }
+}
+
+// Clear any existing model error notifications
+function clearModelErrors() {
+    try {
+        const existingNotification = document.getElementById('teachable-machine-error');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+    } catch (error) {
+        // Silent fail
+    }
+}
+
+// Create a custom error notification in the UI
+function createCustomErrorNotification(message) {
+    try {
+        // Remove any existing error notifications
+        const existingNotification = document.getElementById('teachable-machine-error');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        // Create error notification element
+        const notification = document.createElement('div');
+        notification.id = 'teachable-machine-error';
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #ff4444;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 10000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 400px;
+            word-wrap: break-word;
+        `;
+        
+        notification.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 18px;">⚠️</span>
+                <span>Teachable Machine: ${message}</span>
+                <button onclick="this.parentElement.parentElement.remove()" 
+                        style="background: none; border: none; color: white; font-size: 18px; cursor: pointer; margin-left: 10px;">
+                    ×
+                </button>
+            </div>
+        `;
+        
+        // Add to page
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 10000);
+        
+    } catch (error) {
+        console.error('Teachable Machine: Could not create error notification:', error);
+    }
+}
+
+// Function to set default labels when no model is loaded
+function setDefaultLabels() {
+    modelLabels = ['class1', 'class2', 'class3'];
     
     // Force refresh the extension menus
     if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
         try {
             window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
-            console.log('Teachable Machine: Extension menus refreshed with test labels');
         } catch (e) {
-            console.log('Teachable Machine: Could not refresh menus:', e.message);
-        }
-    }
-    
-    // Also try to refresh the runtime
-    if (runtime) {
-        try {
-            runtime.emit('BLOCKSINFO_UPDATE');
-            console.log('Teachable Machine: Runtime refresh completed');
-        } catch (e) {
-            console.log('Teachable Machine: Runtime refresh failed:', e.message);
-        }
-    }
-    
-    // Force a re-render by triggering a workspace update
-    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm && window.Scratch.vm.workspace) {
-        try {
-            window.Scratch.vm.workspace.emit('change');
-            console.log('Teachable Machine: Workspace change event triggered');
-        } catch (e) {
-            console.log('Teachable Machine: Could not trigger workspace change:', e.message);
+            // Silent fail
         }
     }
 }
 
 // Manual functions that can be called from console
 window.clearTeachableMachineCallbacks = function() {
-    detectionCallbacks.clear();
-    lastTriggeredLabels.clear();
-    registeredLabels.clear();
-    console.log('Teachable Machine: All detection callbacks, trigger history, and registered labels cleared manually');
-};
-
-window.resetTeachableMachineRegistrations = function() {
-    detectionCallbacks.clear();
-    lastTriggeredLabels.clear();
-    registeredLabels.clear();
-    console.log('Teachable Machine: All registrations reset - you can now re-add your detection blocks');
-};
-
-window.debugTeachableMachineBlocks = function() {
-    console.log('=== Teachable Machine Block Debug ===');
-    
-    if (!runtime) {
-        console.log('❌ No runtime available');
-        return;
-    }
-    
-    if (runtime.targets) {
-        console.log(`📊 Found ${runtime.targets.length} targets (sprites/stage)`);
-        
-        for (const target of runtime.targets) {
-            console.log(`🎭 Target: ${target.name} (${target.isStage ? 'Stage' : 'Sprite'})`);
-            
-            if (target.blocks && target.blocks._blocks) {
-                const blocks = target.blocks._blocks;
-                console.log(`  📦 Has ${Object.keys(blocks).length} blocks`);
-                
-                // Look for our specific blocks
-                for (const blockId in blocks) {
-                    const block = blocks[blockId];
-                    if (block.opcode === 'tm_whenModelDetects') {
-                        console.log(`  🎯 Found tm_whenModelDetects block:`, {
-                            id: blockId,
-                            label: block.fields?.label?.value,
-                            opcode: block.opcode
-                        });
-                    }
-                }
-            } else {
-                console.log(`  ❌ No blocks found`);
-            }
-        }
-    } else {
-        console.log('❌ No targets available');
-    }
-    
-    // Check runtime capabilities
-    console.log('🔧 Runtime capabilities:');
-    console.log('  - startHats:', !!runtime.startHats);
-    console.log('  - sequencer:', !!runtime.sequencer);
-    console.log('  - stepThread:', !!(runtime.sequencer && runtime.sequencer.stepThread));
-    console.log('  - emit:', !!runtime.emit);
-    
-    console.log('=====================================');
+    // Function kept for compatibility
 };
 
 window.getTeachableMachineStatus = function() {
@@ -427,349 +664,125 @@ window.getTeachableMachineStatus = function() {
         isDetecting: isDetecting,
         currentPrediction: currentPrediction,
         labels: modelLabels,
-        callbacks: Array.from(detectionCallbacks.keys()),
-        lastTriggered: Array.from(lastTriggeredLabels),
-        registeredLabels: Array.from(registeredLabels)
+        modelConfidences: modelConfidences
     };
-};
-
-window.refreshTeachableMachineLabels = function() {
-    console.log('Teachable Machine: Manual refresh requested');
-    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
-        try {
-            window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
-            console.log('Teachable Machine: Manual refresh completed');
-        } catch (e) {
-            console.log('Teachable Machine: Manual refresh failed:', e.message);
-        }
-    }
-    
-    // Also try runtime refresh
-    if (runtime) {
-        try {
-            runtime.emit('BLOCKSINFO_UPDATE');
-            console.log('Teachable Machine: Runtime refresh completed');
-        } catch (e) {
-            console.log('Teachable Machine: Runtime refresh failed:', e.message);
-        }
-    }
 };
 
 window.getTeachableMachineLabels = function() {
-    console.log('Teachable Machine: Current labels:', modelLabels);
-    console.log('Teachable Machine: Current callbacks:', Array.from(detectionCallbacks.keys()));
-    return { labels: modelLabels, callbacks: Array.from(detectionCallbacks.keys()) };
+    return { labels: modelLabels };
 };
 
-window.testTeachableMachineDetection = function(label) {
-    console.log(`Teachable Machine: Manually testing detection for label: ${label}`);
+// Function to show URL detection status
+window.showURLDetectionStatus = function() {
+    const urlParam = getURLParameter('teachableLink');
     
-    // Simulate a detection
-    const mockPrediction = {
-        label: label,
-        confidence: 0.95
-    };
-    
-    // Trigger callbacks for this label
-    for (const [callbackKey, callbackData] of detectionCallbacks.entries()) {
-        if (callbackData.label === label) {
-            try {
-                callbackData.callback(mockPrediction);
-            } catch (e) {
-                console.error(`Teachable Machine: Error in test callback for ${label}:`, e);
-            }
-        }
-    }
-    
-    // Also try to trigger the Scratch block directly
-    if (typeof triggerScratchBlock === 'function') {
-        triggerScratchBlock(label, mockPrediction);
-    }
-};
-
-window.forceTeachableMachineDetection = function(label) {
-    console.log(`Teachable Machine: Force triggering detection for label: ${label}`);
-    
-    // Clear the label from triggered set to allow immediate re-triggering
-    lastTriggeredLabels.delete(label);
-    
-    // Create a mock prediction
-    const mockPrediction = {
-        label: label,
-        confidence: 0.95
-    };
-    
-    // Trigger the Scratch block
-    if (typeof triggerScratchBlock === 'function') {
-        triggerScratchBlock(label, mockPrediction);
-    }
-};
-
-window.testTeachableMachineMenu = function() {
-    console.log('Teachable Machine: Testing menu items function...');
-    
-    // Simulate what the menu items function does
-    if (modelLabels && Array.isArray(modelLabels) && modelLabels.length > 0) {
-        const validLabels = modelLabels.filter(label => 
-            label && typeof label === 'string' && label.trim().length > 0
-        );
-        
-        // Format as [displayText, value] pairs
-        const menuItems = validLabels.map(label => [label, label]);
-        console.log('Teachable Machine: Menu would return:', menuItems);
-        return menuItems;
+    if (urlParam) {
+        const projectId = extractProjectId(urlParam);
+        const fullURL = constructTeachableMachineURL(projectId);
+        return {
+            urlParam: urlParam,
+            projectId: projectId,
+            fullURL: fullURL
+        };
     } else {
-        console.log('Teachable Machine: Menu would return default labels');
-        return [['class1', 'class1'], ['class2', 'class2'], ['class3', 'class3']];
+        return {
+            urlParam: null,
+            projectId: null,
+            fullURL: null
+        };
     }
 };
 
-window.checkTeachableMachineSetup = function() {
-    console.log('=== Teachable Machine Setup Check ===');
-    console.log('Model loaded:', isModelLoaded);
-    console.log('Video enabled:', videoEnabled);
-    console.log('Detection active:', isDetecting);
-    console.log('Current labels:', modelLabels);
-    console.log('Registered callbacks:', detectionCallbacks.size);
-    console.log('Prediction interval:', !!predictionInterval);
-    console.log('Current prediction:', currentPrediction);
-    console.log('Runtime available:', !!runtime);
-    
-    if (runtime && runtime.ioDevices) {
-        console.log('Video system available:', !!runtime.ioDevices.video);
-    }
-    
-    console.log('=====================================');
+// Function to manually trigger URL detection
+window.triggerURLDetection = function() {
+    initializeFromURL();
+    return window.showURLDetectionStatus();
 };
 
-window.restartTeachableMachinePrediction = function() {
-    console.log('Teachable Machine: Restarting prediction loop...');
-    startPredictionLoop();
-};
-
-window.setupTeachableMachineWebcam = async function() {
-    console.log('Teachable Machine: Setting up webcam directly...');
-    
-    try {
-        // Check if we already have a webcam setup
-        if (window.webcam && window.webcam.stream && window.webcam.stream.active) {
-            console.log('Teachable Machine: Webcam already active');
-            return true;
-        }
+// Function to manually set project ID
+window.setProjectID = function(projectId) {
+    if (projectId) {
+        const fullURL = constructTeachableMachineURL(projectId);
+        window.teachableMachineProjectId = projectId;
+        window.teachableMachineFullURL = fullURL;
         
-        // Create a webcam element
-        const video = document.createElement('video');
-        video.width = 200;
-        video.height = 200;
-        video.autoplay = true;
-        video.muted = true;
-        video.playsInline = true;
+        // Auto-load the model
+        loadModel(fullURL);
         
-        // Get user media with better error handling
-        let stream;
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    width: { ideal: 200 },
-                    height: { ideal: 200 },
-                    facingMode: 'user'
-                },
-                audio: false
-            });
-        } catch (mediaError) {
-            console.warn('Teachable Machine: getUserMedia failed, trying with minimal constraints:', mediaError.message);
-            
-            // Try with minimal constraints
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true,
-                    audio: false
-                });
-            } catch (minimalError) {
-                console.error('Teachable Machine: Even minimal video constraints failed:', minimalError.message);
-                throw minimalError;
-            }
-        }
+        // Refresh blocks to show new URL
+        window.refreshTeachableMachineBlocks();
         
-        video.srcObject = stream;
-        
-        // Create canvas for predictions
-        const canvas = document.createElement('canvas');
-        canvas.width = 200;
-        canvas.height = 200;
-        const ctx = canvas.getContext('2d');
-        
-        // Store webcam reference
-        window.webcam = {
-            video: video,
-            canvas: canvas,
-            stream: stream,
-            ctx: ctx
-        };
-        
-        // Start drawing frames to canvas
-        function drawFrame() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, 200, 200);
-            }
-            requestAnimationFrame(drawFrame);
-        }
-        
-        video.onloadedmetadata = () => {
-            drawFrame();
-            console.log('Teachable Machine: Webcam setup complete');
-        };
-        
-        // Handle video errors
-        video.onerror = (error) => {
-            console.error('Teachable Machine: Video element error:', error);
-        };
-        
+        // Update block text
+        updateUseModelBlockText(fullURL);
         return true;
-    } catch (error) {
-        console.error('Teachable Machine: Failed to setup webcam:', error);
-        
-        // Provide helpful error messages
-        if (error.name === 'NotAllowedError') {
-            console.error('Teachable Machine: Camera permission denied. Please allow camera access and try again.');
-        } else if (error.name === 'NotFoundError') {
-            console.error('Teachable Machine: No camera found on this device.');
-        } else if (error.name === 'NotReadableError') {
-            console.error('Teachable Machine: Camera is already in use by another application.');
-        }
-        
+    } else {
+        console.error('Teachable Machine: No project ID provided');
         return false;
     }
 };
 
-window.testTeachableMachineModel = async function() {
-    console.log('Teachable Machine: Testing model with current frame...');
-    
-    if (!isModelLoaded) {
-        console.log('Teachable Machine: Model not loaded yet');
-        return null;
-    }
-    
-    try {
-        const result = await predict();
-        console.log('Teachable Machine: Test prediction result:', result);
-        return result;
-    } catch (error) {
-        console.error('Teachable Machine: Test prediction failed:', error);
-        return null;
-    }
-};
-
-window.checkTeachableMachineWebcam = function() {
-    console.log('=== Teachable Machine Webcam Check ===');
-    
-    if (window.webcam) {
-        console.log('Webcam object exists:', !!window.webcam);
-        console.log('Video element:', !!window.webcam.video);
-        console.log('Canvas element:', !!window.webcam.canvas);
-        console.log('Stream active:', window.webcam.stream && window.webcam.stream.active);
-        
-        if (window.webcam.video) {
-            console.log('Video ready state:', window.webcam.video.readyState);
-            console.log('Video dimensions:', window.webcam.video.videoWidth, 'x', window.webcam.video.videoHeight);
-        }
-    } else {
-        console.log('No webcam object found');
-    }
-    
-    if (runtime && runtime.ioDevices && runtime.ioDevices.video) {
-        console.log('Scratch video system available');
+// Function to refresh extension blocks
+window.refreshTeachableMachineBlocks = function() {
+    if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm) {
         try {
-            const frame = runtime.ioDevices.video.getFrame({
-                format: 'canvas',
-                dimensions: [200, 200]
-            });
-            console.log('Scratch video frame available:', !!frame);
+            window.Scratch.vm.emit('BLOCKSINFO_UPDATE');
         } catch (e) {
-            console.log('Scratch video frame error:', e.message);
+            // Silent fail
         }
-    } else {
-        console.log('Scratch video system not available');
     }
-    
-    // Check camera permissions
-    if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: 'camera' }).then(permissionStatus => {
-            console.log('Camera permission status:', permissionStatus.state);
-            if (permissionStatus.state === 'denied') {
-                console.warn('⚠️ Camera permission denied. You need to allow camera access in your browser settings.');
-            }
-        }).catch(e => {
-            console.log('Could not check camera permission status:', e.message);
-        });
-    }
-    
-    console.log('=====================================');
 };
 
-window.requestCameraPermission = async function() {
-    console.log('Teachable Machine: Requesting camera permission...');
-    
+// Function to update the useModel block text with the detected URL
+function updateUseModelBlockText(url) {
     try {
-        // Try to get a minimal video stream to request permission
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: true,
-            audio: false
-        });
-        
-        // Stop the stream immediately after getting permission
-        stream.getTracks().forEach(track => track.stop());
-        
-        console.log('✅ Camera permission granted!');
-        return true;
+        // Try to find and update the block in the workspace
+        if (typeof window !== 'undefined' && window.Scratch && window.Scratch.vm && window.Scratch.vm.workspace) {
+            const workspace = window.Scratch.vm.workspace;
+            
+            // Look for blocks with our opcode
+            if (workspace.getAllBlocks) {
+                const allBlocks = workspace.getAllBlocks();
+                let updatedCount = 0;
+                
+                for (const block of allBlocks) {
+                    if (block.type === 'tm_useModel') {
+                        try {
+                            // Try to update the block's field value
+                            if (block.inputs && block.inputs.URL && block.inputs.URL.block) {
+                                const inputBlock = block.inputs.URL.block;
+                                if (inputBlock.fields && inputBlock.fields.TEXT) {
+                                    inputBlock.fields.TEXT.value = url;
+                                    updatedCount++;
+                                }
+                            }
+                        } catch (blockError) {
+                            // Silent fail
+                        }
+                    }
+                }
+                
+                if (updatedCount > 0) {
+                    // Force a workspace update
+                    workspace.fireChangeListener();
+                }
+            }
+        }
     } catch (error) {
-        console.error('❌ Camera permission denied:', error.message);
-        
-        if (error.name === 'NotAllowedError') {
-            console.error('💡 To fix this:');
-            console.error('1. Click the camera icon in your browser address bar');
-            console.error('2. Select "Allow" for camera access');
-            console.error('3. Refresh the page and try again');
-        }
-        
-        return false;
+        // Silent fail
     }
-};
-
-// Auto-initialize when extension loads
-setTimeout(initializeFromURL, 1000);
-
-// Test labels after 3 seconds for debugging
-setTimeout(setTestLabels, 3000);
-
-// Additional test after 5 seconds to ensure labels are set
-setTimeout(() => {
-    console.log('Teachable Machine: 5-second check - current labels:', modelLabels);
-    if (modelLabels && modelLabels.length > 0) {
-        console.log('Teachable Machine: Labels are set, testing menu function...');
-        window.testTeachableMachineMenu();
-    } else {
-        console.log('Teachable Machine: Labels are still not set after 5 seconds');
-    }
-}, 5000);
-
-// Start prediction loop when extension is loaded
-function startPredictionLoop() {
-    if (predictionInterval) {
-        clearInterval(predictionInterval);
-    }
-    
-    predictionInterval = setInterval(async () => {
-        if (isModelLoaded && videoEnabled) {
-            await predict();
-        }
-    }, 100);
-    
-    console.log('Teachable Machine: Prediction loop started');
 }
 
-// Start the prediction loop
-startPredictionLoop();
+// Auto-initialize when extension loads - call immediately to set URL variables before blocks are rendered
+initializeFromURL();
+
+// Set default labels after initialization
+setTimeout(setDefaultLabels, 1000);
+
+// Make the updateUseModelBlockText function available globally
+window.updateUseModelBlockText = updateUseModelBlockText;
+
+// Make error clearing function available globally
+window.clearTeachableMachineErrors = clearModelErrors;
 
 // Main extension function that Scratch calls
 function TeachableMachineExtension(runtimeInstance) {
@@ -779,166 +792,8 @@ function TeachableMachineExtension(runtimeInstance) {
     console.log('Teachable Machine Extension: Runtime initialized:', !!runtime);
     console.log('Teachable Machine Extension: Video system available:', !!(runtime && runtime.ioDevices && runtime.ioDevices.video));
     
-    // Function to trigger Scratch blocks when detection occurs
-    const triggerScratchBlock = (label, prediction) => {
-        if (!runtime) return;
-        
-        console.log(`Teachable Machine: 🔥 Attempting to trigger Scratch block for ${label}...`);
-        
-        try {
-            // Method 1: Try to start hats using the runtime (most reliable)
-            if (runtime.startHats) {
-                try {
-                    console.log(`🎯 Teachable Machine: Trying startHats for ${label}...`);
-                    runtime.startHats('tm_whenModelDetects', {
-                        label: label,
-                        prediction: prediction
-                    });
-                    console.log(`✅ Teachable Machine: Successfully triggered hat block for ${label} using startHats`);
-                    return; // Exit if successful
-                } catch (e) {
-                    console.log(`⚠️ Teachable Machine: startHats failed for ${label}:`, e.message);
-                }
-            }
-            
-            // Method 2: Try to trigger blocks directly using runtime.sequencer
-            if (runtime.sequencer && runtime.sequencer.stepThread) {
-                try {
-                    console.log(`🎯 Teachable Machine: Trying sequencer.stepThread for ${label}...`);
-                    // Find all sprites and trigger their hat blocks
-                    for (const target of runtime.targets) {
-                        if (target.blocks && target.blocks._blocks) {
-                            for (const blockId in target.blocks._blocks) {
-                                const block = target.blocks._blocks[blockId];
-                                if (block.opcode === 'tm_whenModelDetects' && 
-                                    block.fields && 
-                                    block.fields.label && 
-                                    block.fields.label.value === label) {
-                                    
-                                    console.log(`🎯 Teachable Machine: Found EXACT matching block for ${label} in target ${target.name}`);
-                                    
-                                    // Create a proper block object and step the thread
-                                    const blockObj = target.blocks.createBlock(blockId);
-                                    if (blockObj) {
-                                        console.log(`🎯 Teachable Machine: Created block object for ${label}, stepping thread...`);
-                                        runtime.sequencer.stepThread(blockObj);
-                                        console.log(`✅ Teachable Machine: Successfully stepped thread for ${label} in ${target.name}`);
-                                        return; // Exit if successful
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Teachable Machine: sequencer.stepThread failed for ${label}:`, e.message);
-                }
-            }
-            
-            // Method 3: Try using runtime.emit for custom events
-            if (runtime.emit) {
-                try {
-                    console.log(`🎯 Teachable Machine: Trying emit for ${label}...`);
-                    runtime.emit('HAT_BLOCK_TRIGGERED', {
-                        opcode: 'tm_whenModelDetects',
-                        label: label,
-                        prediction: prediction
-                    });
-                    console.log(`📡 Teachable Machine: Emitted HAT_BLOCK_TRIGGERED event for ${label}`);
-                } catch (e) {
-                    console.log(`⚠️ Teachable Machine: emit failed for ${label}:`, e.message);
-                }
-            }
-            
-            // Method 4: Try to force a runtime update with exact label matching
-            if (runtime.targets) {
-                try {
-                    console.log(`🎯 Teachable Machine: Trying runtime update for ${label}...`);
-                    // Force all targets to update
-                    for (const target of runtime.targets) {
-                        if (target.blocks && target.blocks._blocks) {
-                            // Look for any blocks that might be waiting for this event
-                            for (const blockId in target.blocks._blocks) {
-                                const block = target.blocks._blocks[blockId];
-                                if (block.opcode === 'tm_whenModelDetects' && 
-                                    block.fields && 
-                                    block.fields.label && 
-                                    block.fields.label.value === label) {
-                                    
-                                    console.log(`🔄 Teachable Machine: Found EXACT ${block.opcode} block for ${label} in ${target.name}, attempting to trigger...`);
-                                    
-                                    // Try to create a new thread for this block
-                                    if (runtime.sequencer && runtime.sequencer.stepThread) {
-                                        try {
-                                            const blockObj = target.blocks.createBlock(blockId);
-                                            runtime.sequencer.stepThread(blockObj);
-                                            console.log(`✅ Teachable Machine: Thread stepped successfully for ${label} in ${target.name}`);
-                                            return; // Exit if successful
-                                        } catch (e) {
-                                            console.log(`⚠️ Teachable Machine: Could not step thread for ${target.name}:`, e.message);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Teachable Machine: Runtime update failed:`, e.message);
-                }
-            }
-            
-            // Method 5: Try using Scratch's internal event system with exact matching
-            if (runtime.targets) {
-                try {
-                    console.log(`🎯 Teachable Machine: Trying internal event system for ${label}...`);
-                    for (const target of runtime.targets) {
-                        if (target.blocks && target.blocks._blocks) {
-                            for (const blockId in target.blocks._blocks) {
-                                const block = target.blocks._blocks[blockId];
-                                if (block.opcode === 'tm_whenModelDetects' && 
-                                    block.fields && 
-                                    block.fields.label && 
-                                    block.fields.label.value === label) {
-                                    
-                                    console.log(`🎯 Teachable Machine: Method 5 - Found EXACT match for ${label} in ${target.name}`);
-                                    
-                                    // Try to trigger the block using Scratch's internal methods
-                                    if (target.blocks && target.blocks.createBlock) {
-                                        try {
-                                            const blockObj = target.blocks.createBlock(blockId);
-                                            
-                                            // Try multiple ways to start the block
-                                            if (runtime.sequencer && runtime.sequencer.stepThread) {
-                                                runtime.sequencer.stepThread(blockObj);
-                                                console.log(`✅ Teachable Machine: Method 5 - Thread stepped successfully for ${label}`);
-                                                return;
-                                            }
-                                            
-                                            // Alternative: try to start the block directly
-                                            if (blockObj && typeof blockObj.start === 'function') {
-                                                blockObj.start();
-                                                console.log(`✅ Teachable Machine: Method 5 - Block started directly for ${label}`);
-                                                return;
-                                            }
-                                            
-                                        } catch (e) {
-                                            console.log(`⚠️ Teachable Machine: Method 5 failed for ${label}:`, e.message);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Teachable Machine: Method 5 failed:`, e.message);
-                }
-            }
-            
-            console.log(`❌ Teachable Machine: All triggering methods failed for ${label}`);
-            
-        } catch (e) {
-            console.error(`💥 Teachable Machine: Critical error triggering Scratch block for ${label}:`, e);
-        }
-    };
+    // Start the prediction loop
+    predictionLoop();
     
     // Cleanup function for when extension is unloaded
     const cleanup = () => {
@@ -946,9 +801,6 @@ function TeachableMachineExtension(runtimeInstance) {
             clearInterval(predictionInterval);
             predictionInterval = null;
         }
-        detectionCallbacks.clear();
-        lastTriggeredLabels.clear();
-        registeredLabels.clear();
         console.log('Teachable Machine: Extension cleaned up');
     };
     
@@ -960,7 +812,6 @@ function TeachableMachineExtension(runtimeInstance) {
     // Return the extension object
     return {
         getInfo() {
-            console.log('Teachable Machine: getInfo() called, current labels:', modelLabels);
             return {
                 id: 'tm',
                 name: 'Teachable Machine',
@@ -973,12 +824,12 @@ function TeachableMachineExtension(runtimeInstance) {
                         text: formatMessage({
                             id: 'teachable_machine.useModel',
                             default: 'use model [url]',
-                            description: 'Load a Teachable Machine model from URL'
+                            description: 'Load a Teachable Machine model from URL or auto-detect from URL parameters'
                         }),
                         arguments: {
                             url: {
                                 type: ArgumentType.STRING,
-                                defaultValue: 'https://teachablemachine.withgoogle.com/models/-Y0Sh0vSa/'
+                                defaultValue: 'Auto-detected from URL'
                             }
                         },
                         iconURI: 'static/Neural Logo-Light Green.png'
@@ -1083,10 +934,6 @@ function TeachableMachineExtension(runtimeInstance) {
                     labels: {
                         acceptReporters: false,
                         items: () => {
-                            console.log('Teachable Machine: Menu labels function called, current labels:', modelLabels);
-                            console.log('Teachable Machine: modelLabels type:', typeof modelLabels);
-                            console.log('Teachable Machine: modelLabels isArray:', Array.isArray(modelLabels));
-                            
                             // Always return valid labels, with fallback to defaults
                             if (modelLabels && Array.isArray(modelLabels) && modelLabels.length > 0) {
                                 // Filter out any invalid labels and ensure they're strings
@@ -1094,21 +941,15 @@ function TeachableMachineExtension(runtimeInstance) {
                                     label && typeof label === 'string' && label.trim().length > 0
                                 );
                                 
-                                console.log('Teachable Machine: Filtered valid labels:', validLabels);
-                                
                                 if (validLabels.length > 0) {
-                                    console.log('Teachable Machine: Returning valid labels:', validLabels);
-                                    
                                     // Return labels in the format that Scratch expects
                                     // Each item should be [displayText, value] pair
                                     const menuItems = validLabels.map(label => [label, label]);
-                                    console.log('Teachable Machine: Menu items formatted:', menuItems);
                                     return menuItems;
                                 }
                             }
                             
                             // Fallback to default labels
-                            console.log('Teachable Machine: Using default labels');
                             return [['class1', 'class1'], ['class2', 'class2'], ['class3', 'class3']];
                         }
                     },
@@ -1123,50 +964,43 @@ function TeachableMachineExtension(runtimeInstance) {
 
         // Block implementations
         useModel: async function (args, util) {
-            const url = args.url;
-            if (url && url.trim()) {
+            let url = args.url;
+            
+            // Check if we have a detected project ID from URL parameters
+            if (window.teachableMachineProjectId && window.teachableMachineFullURL) {
+                console.log('Teachable Machine: Using detected project ID:', window.teachableMachineProjectId);
+                console.log('Teachable Machine: Using constructed URL:', window.teachableMachineFullURL);
+                url = window.teachableMachineFullURL;
+            } else if (url && url.trim()) {
+                // If no detected project ID, use the block argument
+                console.log('Teachable Machine: Using block argument URL:', url);
+                url = url.trim();
+            } else {
+                console.log('Teachable Machine: No URL provided and no project ID detected');
+                return;
+            }
+            
+            if (url) {
                 console.log('Teachable Machine: Loading model from:', url);
-                const success = await loadModel(url.trim());
+                const success = await loadModel(url);
                 if (success) {
                     console.log('Teachable Machine: Model loaded successfully, ready for detection');
                 } else {
+                    // Error message already shown by loadModel function
                     console.error('Teachable Machine: Failed to load model');
                 }
             }
         },
 
-        
+        // This is the key block - it returns a boolean that Scratch continuously checks
         whenModelDetects: function (args, util) {
             const label = args.label;
             
-            // Check if this label is already registered to prevent duplicates during recompilation
-            if (registeredLabels.has(label)) {
-                console.log(`Teachable Machine: Label ${label} already registered, skipping duplicate`);
-                return true;
-            }
+            // Return true if the current prediction matches this label
+            // This is what makes the hat block work - Scratch keeps checking this condition
+            const matches = isPrediction(label);
             
-            // Generate a unique callback key using label and a timestamp
-            const callbackKey = `${label}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
-            // Store the callback with the unique key
-            detectionCallbacks.set(callbackKey, {
-                label: label,
-                callback: (prediction) => {
-                    // This will be called when the label is detected
-                    console.log(`Teachable Machine: Label ${label} detected with confidence ${prediction.confidence}`);
-                    
-                    // The actual triggering will be handled by the main trigger function
-                    // This callback just logs the detection
-                }
-            });
-            
-            // Mark this label as registered
-            registeredLabels.add(label);
-            
-            console.log(`Teachable Machine: Registered detection callback for label: ${label} (key: ${callbackKey})`);
-            
-            // Return true to indicate the block is ready
-            return true;
+            return matches;
         },
         
         modelPrediction: function (args, util) {
@@ -1188,19 +1022,38 @@ function TeachableMachineExtension(runtimeInstance) {
         
         turnVideo: async function (args, util) {
             const state = args.state;
-            console.log(`Teachable Machine: Turning video ${state}`);
             await setVideoState(state);
         },
         
         setVideoTransparency: function (args, util) {
             const value = args.value;
-            console.log(`Teachable Machine: Setting video transparency to ${value}%`);
             setVideoTransparency(value);
         }
     };
 }
 
-console.log('Teachable Machine Extension: Extension loaded successfully');
-console.log('Teachable Machine Extension: All 7 blocks registered');
-console.log('Teachable Machine Extension: Ready to use');
+// Extension loaded successfully
+
+// Add utility functions to global scope
+window.testTeachableMachineDetection = function(label) {
+    return {
+        currentPrediction: currentPrediction,
+        wouldTrigger: isPrediction(label)
+    };
+};
+
+window.checkTeachableMachineSetup = function() {
+    return {
+        modelLoaded: isModelLoaded,
+        videoEnabled: videoEnabled,
+        detectionActive: isDetecting,
+        currentLabels: modelLabels,
+        currentPrediction: currentPrediction,
+        modelConfidences: modelConfidences,
+        runtimeAvailable: !!runtime,
+        videoSystemAvailable: !!(runtime && runtime.ioDevices && runtime.ioDevices.video)
+    };
+};
+
 module.exports = TeachableMachineExtension;
+
