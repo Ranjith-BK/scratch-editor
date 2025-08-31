@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Teachable Machine Extension Test</title>
+    <title>Teachable Machine Test - Fixed</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -53,16 +53,6 @@
             border-left-color: #ff9800;
             background: #fff3e0;
         }
-        #webcam-container {
-            margin: 20px 0;
-            text-align: center;
-        }
-        #webcam-container video,
-        #webcam-container canvas {
-            border: 2px solid #333;
-            border-radius: 5px;
-            margin: 5px;
-        }
         .log {
             background: #000;
             color: #0f0;
@@ -74,52 +64,34 @@
             margin: 10px 0;
             font-size: 12px;
         }
-        .controls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin: 20px 0;
-        }
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        .control-group label {
-            font-weight: bold;
-            color: #333;
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #2196f3;
         }
     </style>
 </head>
 <body>
-    <h1>🧠 Teachable Machine Extension Test</h1>
+    <h1>🧠 Teachable Machine Extension Test - Fixed</h1>
     
-    <div class="test-section">
-        <h3>📋 Extension Status</h3>
-        <button onclick="checkExtension()">Check Extension Status</button>
-        <button onclick="checkWebcam()">Check Webcam</button>
-        <button onclick="checkScratch()">Check Scratch Runtime</button>
-        <div id="extension-status" class="status">Click "Check Extension Status" to begin</div>
+    <div class="instructions">
+        <h3>📋 Instructions:</h3>
+        <ol>
+            <li>Open your Scratch editor with the Teachable Machine extension</li>
+            <li>Open this page in a separate tab</li>
+            <li>Use the buttons below to test the extension</li>
+            <li>Check the console for detailed logs</li>
+        </ol>
     </div>
     
     <div class="test-section">
-        <h3>🔧 Extension Control</h3>
-        <div class="controls">
-            <div class="control-group">
-                <label>Model URL:</label>
-                <input type="text" id="modelUrl" value="https://teachablemachine.withgoogle.com/models/-Y0Sh0vSa/" style="width: 300px; padding: 5px;">
-            </div>
-            <div class="control-group">
-                <label>Confidence Threshold:</label>
-                <input type="range" id="confidenceThreshold" min="0" max="100" value="80" style="width: 200px;">
-                <span id="confidenceValue">80%</span>
-            </div>
-        </div>
-        <button onclick="loadModel()">Load Model</button>
-        <button onclick="setupWebcam()">Setup Webcam</button>
-        <button onclick="startDetection()">Start Detection</button>
-        <button onclick="stopDetection()">Stop Detection</button>
-        <div id="control-status" class="status">Ready to load model</div>
+        <h3>🔧 Extension Status</h3>
+        <button onclick="checkExtension()">Check Extension Status</button>
+        <button onclick="checkWebcam()">Check Webcam</button>
+        <button onclick="requestPermission()">Request Camera Permission</button>
+        <button onclick="debugBlocks()">Debug Blocks</button>
+        <div id="extension-status" class="status">Click "Check Extension Status" to begin</div>
     </div>
     
     <div class="test-section">
@@ -128,24 +100,11 @@
         <button onclick="testDetection('Ranjith')">Test Ranjith Detection</button>
         <button onclick="forceDetection('Usha')">Force Usha Block</button>
         <button onclick="forceDetection('Ranjith')">Force Ranjith Block</button>
+        <button onclick="testBlockTrigger('Usha')">Test Block Trigger Usha</button>
+        <button onclick="testBlockTrigger('Ranjith')">Test Block Trigger Ranjith</button>
         <button onclick="clearCallbacks()" class="danger">Clear All Callbacks</button>
+        <button onclick="resetRegistrations()" class="danger">Reset All Registrations</button>
         <div id="detection-status" class="status">No detections yet</div>
-    </div>
-    
-    <div class="test-section">
-        <h3>📹 Webcam Feed</h3>
-        <div id="webcam-container">
-            <p>Webcam will appear here when setup</p>
-        </div>
-    </div>
-    
-    <div class="test-section">
-        <h3>📊 Current Prediction</h3>
-        <div id="prediction-display" class="status">
-            <strong>Label:</strong> <span id="current-label">None</span><br>
-            <strong>Confidence:</strong> <span id="current-confidence">0%</span><br>
-            <strong>Status:</strong> <span id="prediction-status">Not running</span>
-        </div>
     </div>
     
     <div class="test-section">
@@ -187,11 +146,6 @@
             addToLog(args.join(' '), 'warn');
         };
         
-        // Update confidence threshold display
-        document.getElementById('confidenceThreshold').addEventListener('input', function() {
-            document.getElementById('confidenceValue').textContent = this.value + '%';
-        });
-        
         // Test functions
         function checkExtension() {
             const statusDiv = document.getElementById('extension-status');
@@ -217,93 +171,33 @@
             }
         }
         
-        function checkScratch() {
+        function requestPermission() {
             const statusDiv = document.getElementById('extension-status');
             
-            if (typeof window.checkScratchRuntime === 'function') {
-                statusDiv.innerHTML = '🎮 Checking Scratch runtime...';
-                window.checkScratchRuntime();
-            } else {
-                statusDiv.innerHTML = '❌ Scratch runtime check function not available';
-            }
-        }
-        
-        async function loadModel() {
-            const statusDiv = document.getElementById('control-status');
-            const modelUrl = document.getElementById('modelUrl').value;
-            
-            if (typeof window.loadModel === 'function') {
-                statusDiv.innerHTML = '🔄 Loading model...';
-                try {
-                    const result = await window.loadModel(modelUrl);
-                    if (result) {
+            if (typeof window.requestCameraPermission === 'function') {
+                statusDiv.innerHTML = '📹 Requesting camera permission...';
+                window.requestCameraPermission().then(granted => {
+                    if (granted) {
                         statusDiv.className = 'status';
-                        statusDiv.innerHTML = '✅ Model loaded successfully!';
+                        statusDiv.innerHTML = '✅ Camera permission granted!';
                     } else {
                         statusDiv.className = 'status error';
-                        statusDiv.innerHTML = '❌ Failed to load model';
+                        statusDiv.innerHTML = '❌ Camera permission denied. Check browser settings.';
                     }
-                } catch (error) {
-                    statusDiv.className = 'status error';
-                    statusDiv.innerHTML = '❌ Error loading model: ' + error.message;
-                }
+                });
             } else {
-                statusDiv.className = 'status error';
-                statusDiv.innerHTML = '❌ Model loading function not available';
+                statusDiv.innerHTML = '❌ Permission request function not available';
             }
         }
         
-        async function setupWebcam() {
-            const statusDiv = document.getElementById('control-status');
+        function debugBlocks() {
+            const statusDiv = document.getElementById('extension-status');
             
-            if (typeof window.setupTeachableMachineWebcam === 'function') {
-                statusDiv.innerHTML = '📹 Setting up webcam...';
-                try {
-                    const result = await window.setupTeachableMachineWebcam();
-                    if (result) {
-                        statusDiv.className = 'status';
-                        statusDiv.innerHTML = '✅ Webcam setup complete!';
-                        
-                        // Add webcam elements to the container
-                        const container = document.getElementById('webcam-container');
-                        if (window.webcam) {
-                            container.innerHTML = '';
-                            if (window.webcam.video) container.appendChild(window.webcam.video);
-                            if (window.webcam.canvas) container.appendChild(window.webcam.canvas);
-                        }
-                    } else {
-                        statusDiv.className = 'status error';
-                        statusDiv.innerHTML = '❌ Webcam setup failed';
-                    }
-                } catch (error) {
-                    statusDiv.className = 'status error';
-                    statusDiv.innerHTML = '❌ Error setting up webcam: ' + error.message;
-                }
+            if (typeof window.debugTeachableMachineBlocks === 'function') {
+                statusDiv.innerHTML = '🔍 Debugging blocks... Check console for details';
+                window.debugTeachableMachineBlocks();
             } else {
-                statusDiv.className = 'status error';
-                statusDiv.innerHTML = '❌ Webcam setup function not available';
-            }
-        }
-        
-        function startDetection() {
-            const statusDiv = document.getElementById('control-status');
-            
-            if (typeof window.startTeachableMachineDetection === 'function') {
-                statusDiv.innerHTML = '🚀 Starting detection...';
-                window.startTeachableMachineDetection();
-            } else {
-                statusDiv.innerHTML = '❌ Detection start function not available';
-            }
-        }
-        
-        function stopDetection() {
-            const statusDiv = document.getElementById('control-status');
-            
-            if (typeof window.stopTeachableMachineDetection === 'function') {
-                statusDiv.innerHTML = '⏹️ Stopping detection...';
-                window.stopTeachableMachineDetection();
-            } else {
-                statusDiv.innerHTML = '❌ Detection stop function not available';
+                statusDiv.innerHTML = '❌ Debug blocks function not available';
             }
         }
         
@@ -329,6 +223,26 @@
             }
         }
         
+        function testBlockTrigger(label) {
+            const statusDiv = document.getElementById('detection-status');
+            
+            if (typeof window.forceTeachableMachineDetection === 'function') {
+                statusDiv.innerHTML = `🧪 Testing block trigger for: ${label}`;
+                
+                // First debug the blocks
+                if (typeof window.debugTeachableMachineBlocks === 'function') {
+                    window.debugTeachableMachineBlocks();
+                }
+                
+                // Then try to force the detection
+                setTimeout(() => {
+                    window.forceTeachableMachineDetection(label);
+                }, 1000);
+            } else {
+                statusDiv.innerHTML = '❌ Block trigger test function not available';
+            }
+        }
+        
         function clearCallbacks() {
             const statusDiv = document.getElementById('detection-status');
             
@@ -337,6 +251,17 @@
                 window.clearTeachableMachineCallbacks();
             } else {
                 statusDiv.innerHTML = '❌ Clear callbacks function not available';
+            }
+        }
+        
+        function resetRegistrations() {
+            const statusDiv = document.getElementById('detection-status');
+            
+            if (typeof window.resetTeachableMachineRegistrations === 'function') {
+                statusDiv.innerHTML = '🔄 All registrations reset - you can now re-add your detection blocks';
+                window.resetTeachableMachineRegistrations();
+            } else {
+                statusDiv.innerHTML = '❌ Reset registrations function not available';
             }
         }
         
@@ -354,26 +279,6 @@
             a.click();
             URL.revokeObjectURL(url);
         }
-        
-        // Update prediction display
-        function updatePredictionDisplay() {
-            if (typeof window.getTeachableMachineStatus === 'function') {
-                const status = window.getTeachableMachineStatus();
-                if (status.currentPrediction) {
-                    document.getElementById('current-label').textContent = status.currentPrediction.label;
-                    document.getElementById('current-confidence').textContent = 
-                        Math.round(status.currentPrediction.confidence * 100) + '%';
-                    document.getElementById('prediction-status').textContent = 'Active';
-                } else {
-                    document.getElementById('current-label').textContent = 'None';
-                    document.getElementById('current-confidence').textContent = '0%';
-                    document.getElementById('prediction-status').textContent = 'No prediction';
-                }
-            }
-        }
-        
-        // Update prediction display every second
-        setInterval(updatePredictionDisplay, 1000);
         
         // Auto-check extension after page loads
         window.addEventListener('load', () => {

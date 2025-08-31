@@ -3,303 +3,274 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Teachable Machine Extension Test</title>
+    <title>Teachable Machine Test</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #f5f5f5;
         }
         .test-section {
-            background: white;
-            padding: 20px;
             margin: 20px 0;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
         }
-        .icon-preview {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            margin: 20px 0;
-        }
-        .icon-large {
-            width: 48px;
-            height: 48px;
-            background: #4FFF50;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        button {
+            background: #4CAF50;
             color: white;
-            font-weight: bold;
-            font-size: 12px;
-            text-align: center;
-        }
-        .icon-small {
-            width: 24px;
-            height: 24px;
-            background: #4FFF50;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 8px;
-            text-align: center;
-        }
-        .neural-network {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 4px;
-            width: 100%;
-            height: 100%;
-            padding: 4px;
-        }
-        .node {
-            width: 100%;
-            height: 100%;
-            background: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 6px;
-        }
-        .node-small {
-            width: 100%;
-            height: 100%;
-            background: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 4px;
-        }
-        .connection {
-            position: absolute;
-            background: white;
-            height: 1px;
-        }
-        .connection.horizontal {
-            width: 100%;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-        .connection.vertical {
-            width: 1px;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-        .test-button {
-            background: #4FFF50;
-            color: white;
-            border: none;
             padding: 10px 20px;
-            border-radius: 4px;
+            border: none;
+            border-radius: 5px;
             cursor: pointer;
             margin: 5px;
         }
-        .test-button:hover {
-            background: #45E645;
+        button:hover {
+            background: #45a049;
         }
         .status {
+            background: #f9f9f9;
             padding: 10px;
+            border-radius: 5px;
             margin: 10px 0;
-            border-radius: 4px;
         }
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        #webcam-container {
+            margin: 20px 0;
         }
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+        #webcam-container video {
+            border: 2px solid #333;
+            border-radius: 5px;
         }
-        .status.info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
+        #webcam-container canvas {
+            border: 2px solid #666;
+            border-radius: 5px;
+            margin-left: 10px;
+        }
+        .log {
+            background: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
         }
     </style>
 </head>
 <body>
-    <h1>Teachable Machine Extension Test</h1>
+    <h1>Teachable Machine Integration Test</h1>
     
     <div class="test-section">
-        <h2>Extension Icons</h2>
-        <div class="icon-preview">
-            <div>
-                <h3>Large Icon (48x48)</h3>
-                <div class="icon-large">
-                    <div class="neural-network">
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                        <div class="node">N</div>
-                    </div>
-                </div>
-            </div>
-            <div>
-                <h3>Small Icon (24x24)</h3>
-                <div class="icon-small">
-                    <div class="neural-network">
-                        <div class="node-small">N</div>
-                        <div class="node-small">N</div>
-                        <div class="node-small">N</div>
-                        <div class="node-small">N</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <p>These icons represent the neural network concept for the Teachable Machine extension.</p>
+        <h3>Model Setup</h3>
+        <button onclick="loadTestModel()">Load Test Model</button>
+        <button onclick="setupWebcam()">Setup Webcam</button>
+        <button onclick="checkStatus()">Check Status</button>
+        <div id="model-status" class="status">Model not loaded</div>
     </div>
-
+    
     <div class="test-section">
-        <h2>Extension Functionality Test</h2>
-        <p>Test the Teachable Machine extension blocks and functionality:</p>
-        
-        <button class="test-button" onclick="testUseModel()">Test use model [url]</button>
-        <button class="test-button" onclick="testWhenModelDetects()">Test when model detects [label]</button>
-        <button class="test-button" onclick="testModelPrediction()">Test model prediction</button>
-        <button class="test-button" onclick="testPredictionIs()">Test prediction is [label]</button>
-        <button class="test-button" onclick="testConfidenceFor()">Test confidence for [label]</button>
-        <button class="test-button" onclick="testTurnVideo()">Test turn video [state]</button>
-        <button class="test-button" onclick="testSetVideoTransparency()">Test set video transparency</button>
-        
-        <div id="testResults"></div>
+        <h3>Detection Test</h3>
+        <button onclick="testDetection('Ranjith')">Test Ranjith Detection</button>
+        <button onclick="testDetection('Usha')">Test Usha Detection</button>
+        <button onclick="clearCallbacks()">Clear Callbacks</button>
+        <div id="detection-status" class="status">No detections yet</div>
     </div>
-
+    
     <div class="test-section">
-        <h2>URL Parameter Test</h2>
-        <p>Test URL parameter extraction for teachableLink:</p>
-        <input type="text" id="testUrl" placeholder="Enter Teachable Machine URL" style="width: 100%; padding: 10px; margin: 10px 0;">
-        <button class="test-button" onclick="testURLParameter()">Test URL Parameter</button>
-        <div id="urlTestResults"></div>
+        <h3>Webcam</h3>
+        <div id="webcam-container"></div>
     </div>
-
+    
     <div class="test-section">
-        <h2>Extension Integration</h2>
-        <p>This extension will be automatically loaded when Scratch starts and will:</p>
-        <ul>
-            <li>Load TensorFlow.js and Teachable Machine libraries</li>
-            <li>Automatically detect teachableLink from URL parameters</li>
-            <li>Load the model and extract labels from metadata</li>
-            <li>Initialize webcam for pose detection</li>
-            <li>Provide real-time predictions</li>
-            <li>Update dropdown menus with actual model labels</li>
-        </ul>
+        <h3>Console Log</h3>
+        <div id="console-log" class="log"></div>
+        <button onclick="clearLog()">Clear Log</button>
     </div>
-
+    
     <script>
-        // Mock extension functions for testing
-        let mockModel = null;
-        let mockWebcam = null;
-        let mockLabels = ['class1', 'class2', 'class3'];
-        let mockPrediction = null;
-        let mockConfidence = 0.85;
-
-        function addStatus(message, type = 'info') {
-            const results = document.getElementById('testResults');
-            const status = document.createElement('div');
-            status.className = `status ${type}`;
-            status.textContent = message;
-            results.appendChild(status);
+        // Intercept console.log to show in our log div
+        const originalLog = console.log;
+        const originalError = console.error;
+        
+        function addToLog(message, type = 'log') {
+            const logDiv = document.getElementById('console-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#ff6b6b' : '#0f0';
+            logDiv.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
         }
-
-        function testUseModel() {
-            addStatus('Testing use model [url] block...', 'info');
-            // Simulate model loading
-            setTimeout(() => {
-                mockModel = { loaded: true };
-                addStatus('Model loaded successfully!', 'success');
-            }, 1000);
-        }
-
-        function testWhenModelDetects() {
-            addStatus('Testing when model detects [label] block...', 'info');
-            if (mockModel && mockPrediction) {
-                addStatus('Model detection working!', 'success');
-            } else {
-                addStatus('Model not loaded or no prediction available', 'error');
-            }
-        }
-
-        function testModelPrediction() {
-            addStatus('Testing model prediction block...', 'info');
-            mockPrediction = { label: 'class1', confidence: mockConfidence };
-            addStatus(`Current prediction: ${mockPrediction.label} (${(mockPrediction.confidence * 100).toFixed(1)}%)`, 'success');
-        }
-
-        function testPredictionIs() {
-            addStatus('Testing prediction is [label] block...', 'info');
-            if (mockPrediction && mockPrediction.label === 'class1') {
-                addStatus('Prediction check working!', 'success');
-            } else {
-                addStatus('Prediction check failed', 'error');
-            }
-        }
-
-        function testConfidenceFor() {
-            addStatus('Testing confidence for [label] block...', 'info');
-            if (mockPrediction && mockPrediction.label === 'class1') {
-                addStatus(`Confidence for class1: ${(mockPrediction.confidence * 100).toFixed(1)}%`, 'success');
-            } else {
-                addStatus('Confidence check failed', 'error');
-            }
-        }
-
-        function testTurnVideo() {
-            addStatus('Testing turn video [state] block...', 'info');
-            mockWebcam = { state: 'on' };
-            addStatus('Video state changed!', 'success');
-        }
-
-        function testSetVideoTransparency() {
-            addStatus('Testing set video transparency block...', 'info');
-            addStatus('Video transparency set to 50%', 'success');
-        }
-
-        function testURLParameter() {
-            const url = document.getElementById('testUrl').value;
-            const results = document.getElementById('urlTestResults');
-            results.innerHTML = '';
-            
-            if (url) {
-                const status = document.createElement('div');
-                status.className = 'status success';
-                status.textContent = `URL parameter test: ${url}`;
-                results.appendChild(status);
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addToLog(args.join(' '));
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            addToLog(args.join(' '), 'error');
+        };
+        
+        // Test functions
+        async function loadTestModel() {
+            try {
+                const modelURL = 'https://teachablemachine.withgoogle.com/models/-Y0Sh0vSa/';
+                console.log('Loading model from:', modelURL);
                 
-                // Simulate loading model from URL
-                setTimeout(() => {
-                    const loadStatus = document.createElement('div');
-                    loadStatus.className = 'status info';
-                    loadStatus.textContent = 'Model loading from URL...';
-                    results.appendChild(loadStatus);
-                }, 500);
-            } else {
-                const status = document.createElement('div');
-                status.className = 'status error';
-                status.textContent = 'Please enter a URL to test';
-                results.appendChild(status);
+                // Load TensorFlow.js and Teachable Machine
+                if (!window.tf) {
+                    const tfScript = document.createElement('script');
+                    tfScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js';
+                    await new Promise((resolve, reject) => {
+                        tfScript.onload = resolve;
+                        tfScript.onerror = reject;
+                    });
+                    document.head.appendChild(tfScript);
+                }
+                
+                if (!window.tmImage) {
+                    const tmScript = document.createElement('script');
+                    tmScript.src = 'https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js';
+                    await new Promise((resolve, reject) => {
+                        tmScript.onload = resolve;
+                        tmScript.onerror = reject;
+                    });
+                    document.head.appendChild(tmScript);
+                }
+                
+                // Load the model
+                const model = await window.tmImage.load(modelURL + 'model.json', modelURL + 'metadata.json');
+                window.testModel = model;
+                
+                // Get metadata
+                const response = await fetch(modelURL + 'metadata.json');
+                const metadata = await response.json();
+                
+                document.getElementById('model-status').innerHTML = `
+                    Model loaded successfully!<br>
+                    Labels: ${metadata.labels.join(', ')}<br>
+                    Classes: ${metadata.labels.length}
+                `;
+                
+                console.log('Model loaded with labels:', metadata.labels);
+                
+            } catch (error) {
+                console.error('Failed to load model:', error);
+                document.getElementById('model-status').innerHTML = 'Failed to load model: ' + error.message;
             }
         }
-
-        // Auto-test on page load
+        
+        async function setupWebcam() {
+            try {
+                const video = document.createElement('video');
+                video.width = 200;
+                video.height = 200;
+                video.autoplay = true;
+                video.muted = true;
+                video.playsInline = true;
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 200, 
+                        height: 200,
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = 200;
+                canvas.height = 200;
+                const ctx = canvas.getContext('2d');
+                
+                window.webcam = {
+                    video: video,
+                    canvas: canvas,
+                    stream: stream,
+                    ctx: ctx
+                };
+                
+                // Start drawing frames to canvas
+                function drawFrame() {
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        ctx.drawImage(video, 0, 0, 200, 200);
+                    }
+                    requestAnimationFrame(drawFrame);
+                }
+                
+                video.onloadedmetadata = () => {
+                    drawFrame();
+                    console.log('Webcam setup complete');
+                };
+                
+                // Add to page
+                const container = document.getElementById('webcam-container');
+                container.innerHTML = '';
+                container.appendChild(video);
+                container.appendChild(canvas);
+                
+            } catch (error) {
+                console.error('Failed to setup webcam:', error);
+            }
+        }
+        
+        function testDetection(label) {
+            if (!window.testModel) {
+                alert('Please load the model first');
+                return;
+            }
+            
+            console.log(`Testing detection for label: ${label}`);
+            
+            // Simulate detection
+            const mockPrediction = {
+                label: label,
+                confidence: 0.95
+            };
+            
+            // Update status
+            document.getElementById('detection-status').innerHTML = `
+                Detected: ${label}<br>
+                Confidence: ${mockPrediction.confidence}<br>
+                Time: ${new Date().toLocaleTimeString()}
+            `;
+            
+            console.log(`Detection triggered for ${label}`);
+        }
+        
+        function clearCallbacks() {
+            if (window.clearTeachableMachineCallbacks) {
+                window.clearTeachableMachineCallbacks();
+            }
+            document.getElementById('detection-status').innerHTML = 'Callbacks cleared';
+        }
+        
+        function checkStatus() {
+            if (window.getTeachableMachineStatus) {
+                const status = window.getTeachableMachineStatus();
+                console.log('Teachable Machine Status:', status);
+                document.getElementById('model-status').innerHTML = `
+                    Status Check:<br>
+                    Model loaded: ${status.isModelLoaded}<br>
+                    Video enabled: ${status.videoEnabled}<br>
+                    Detection active: ${status.isDetecting}<br>
+                    Labels: ${status.labels.join(', ')}<br>
+                    Callbacks: ${status.callbacks.length}
+                `;
+            } else {
+                console.log('Teachable Machine extension not loaded');
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('console-log').innerHTML = '';
+        }
+        
+        // Auto-setup webcam on page load
         window.addEventListener('load', () => {
-            addStatus('Teachable Machine Extension Test Page Loaded', 'info');
-            addStatus('Extension will automatically detect teachableLink from URL parameters', 'info');
+            console.log('Page loaded, ready for testing');
         });
     </script>
 </body>
